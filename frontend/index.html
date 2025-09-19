@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Legislador — Dinheiro Carimbado</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.12.1/dist/ethers.umd.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Legislador — Dinheiro Carimbado</h1>
+      <div class="actions">
+        <input id="contractAddress" placeholder="Endereço do contrato" />
+        <button id="saveAddress">Salvar</button>
+        <button id="connectBtn">Conectar MetaMask</button>
+      </div>
+      <div id="status" class="status"></div>
+    </header>
+
+    <main>
+      <section id="identity" class="card">
+        <h2>Identidade</h2>
+        <div>Conta: <span id="account">—</span></div>
+        <div>Rede: <span id="network">—</span></div>
+        <div>É Legislador? <span id="isLegislator">—</span></div>
+      </section>
+
+      <section id="areas" class="card">
+        <h2>Áreas cadastradas</h2>
+        <div id="areasList">Carregando…</div>
+      </section>
+
+      <section id="budgets" class="card">
+        <h2>Orçamentos (por Ano e Área)</h2>
+        <div id="budgetsTable">Carregando…</div>
+        <small class="muted">Observação: "Realizado" é somatório total pago a empresas por área (não por ano).</small>
+      </section>
+
+      <section id="newBudget" class="card">
+        <h2>Novo Orçamento</h2>
+        <div class="form-row">
+          <label>Ano (0-65535)</label>
+          <input id="newYear" type="number" min="0" max="65535" placeholder="2025" />
+        </div>
+        <div id="perAreaCaps" class="form-grid"></div>
+        <button id="submitBudget" class="primary">Definir Orçamento</button>
+        <div id="txLog" class="log"></div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+  </html>
