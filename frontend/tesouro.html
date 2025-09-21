@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tesouro — Dinheiro Carimbado</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.12.1/dist/ethers.umd.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Tesouro — Alocação para Órgãos</h1>
+      <div class="actions">
+        <button id="connectBtn">Conectar MetaMask</button>
+      </div>
+      <div id="status" class="status"></div>
+    </header>
+
+    <main>
+      <section id="identity" class="card">
+        <h2>Identidade</h2>
+        <div>Conta: <span id="account">—</span></div>
+        <div>Rede: <span id="network">—</span></div>
+        <div>É Tesouraria? <span id="isTreasury">—</span></div>
+      </section>
+
+      <section id="budgets" class="card">
+        <h2>Orçamentos (por Ano e Área)</h2>
+        <div id="budgetsTable">Carregando…</div>
+        <small class="muted">Total = teto do ano/área; Emitido = já alocado aos órgãos nessa combinação.</small>
+      </section>
+
+      <section id="allocate" class="card">
+        <h2>Alocar para Órgão</h2>
+        <div class="form-grid">
+          <div>
+            <label>Ano (0-65535)</label>
+            <input id="allocYear" type="number" min="0" max="65535" placeholder="2025" />
+          </div>
+          <div>
+            <label>Área</label>
+            <select id="allocArea"></select>
+          </div>
+          <div>
+            <label>Valor</label>
+            <input id="allocAmount" type="number" min="0" step="1" placeholder="0" />
+          </div>
+          <div>
+            <label>Agência</label>
+            <select id="allocAgency"></select>
+          </div>
+        </div>
+        <button id="btnAllocate" class="primary">Alocar</button>
+        <div id="txLog" class="log"></div>
+      </section>
+    </main>
+
+    <script src="./tesouro.js"></script>
+  </body>
+</html>
