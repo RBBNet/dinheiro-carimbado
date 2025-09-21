@@ -1,25 +1,40 @@
 {
   "name": "workshop-token",
   "version": "1.0.0",
-  "main": "index.js",
+  "private": true,
+  "description": "Dinheiro Carimbado Hardhat project",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.18"
+  },
   "scripts": {
     "hh": "hardhat",
     "compile": "hardhat compile",
     "node": "hardhat node",
-    "deploy:local": "hardhat run scripts/deploy.js --network hardhat",
-  "test": "hardhat test",
-  "web": "powershell -NoProfile -Command \"Start-Process powershell -ArgumentList '-NoProfile','-Command','cd frontend; python -m http.server 8080'\""
+    "deploy:notpersistent": "hardhat run scripts/deploy.js --network hardhat",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "test": "hardhat test",
+    "test:deployment": "hardhat test test/simple-deployment.test.js",
+    "test:frontend": "hardhat test test/frontend-validation.test.js",
+    "test:e2e": "hardhat test test/e2e-deployment.test.js",
+    "verify:local": "hardhat run scripts/verify-deployment.js",
+    "verify:network": "hardhat run scripts/verify-deployment.js --network sepolia",
+    "verify:addr": "node scripts/verify-deployment.js",
+    "web": "http-server frontend -p 8080 -c-1"
   },
   "overrides": {
-    "chalk": "5.3.0"
+    "chalk": "^4.1.2"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",
     "@nomicfoundation/hardhat-ethers": "^3.1.0",
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "chai": "^4.2.0",
+    "chai-as-promised": "^7.1.2",
     "ethers": "^6.15.0",
-    "hardhat": "^2.26.2"
+    "hardhat": "^2.26.2",
+    "http-server": "^14.1.1",
+    "mocha": "^10.8.2"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "Dinheiro Carimbado Hardhat project"
+  "keywords": []
 }

@@ -35,6 +35,11 @@
 
   function setStatus(text) { status.textContent = text; }
 
+  // Read-only: contract address is managed on the menu page
+  function getSavedAddress() {
+    return localStorage.getItem("dc_contract") || "";
+  }
+
   // NEW: validate contract address actually has code on current network
   async function assertContractDeployed(addr) {
     if (!ethers.isAddress(addr)) {
@@ -47,8 +52,9 @@
   }
 
   function loadSavedAddress() {
-    const saved = localStorage.getItem("dc_contract");
-    if (saved) contractInput.value = saved;
+    const saved = getSavedAddress();
+    // Only try to reflect into the input if it exists in this page
+    if (saved && contractInput) contractInput.value = saved;
   }
 
   function saveAddress() {
@@ -81,7 +87,7 @@
     console.log("initContract: Iniciando inicialização do contrato...");
     setStatus("Iniciando contrato...");
     try {
-      const addr = contractInput.value.trim();
+  const addr = getSavedAddress();
       console.log("initContract: Endereço informado:", addr);
       if (!addr) {
         console.warn("initContract: Endereço do contrato vazio");
@@ -240,7 +246,7 @@
 
   // Event listeners
   connectBtn.addEventListener('click', connect);
-  saveAddressBtn.addEventListener('click', saveAddress);
+  if (saveAddressBtn) saveAddressBtn.addEventListener('click', () => {/* ignorado aqui; salvar é feito no menu */});
   submitBudget.addEventListener('click', onSubmitBudget);
   loadSavedAddress();
 })();
