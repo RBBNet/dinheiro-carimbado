@@ -20,7 +20,8 @@
     "verify:local": "hardhat run scripts/verify-deployment.js",
     "verify:network": "hardhat run scripts/verify-deployment.js --network sepolia",
     "verify:addr": "node scripts/verify-deployment.js",
-    "web": "http-server frontend -p 8080 -c-1"
+    "web": "http-server frontend -p 8080 -c-1",
+    "load:empresas": "hardhat run scripts/load_empresas.js --network localhost"
   },
   "overrides": {
     "chalk": "^4.1.2"

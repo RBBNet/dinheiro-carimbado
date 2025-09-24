@@ -7,12 +7,12 @@
     "function isLegislator(address) view returns (bool)",
     "function isArea(bytes32) view returns (bool)",
     "function budget(uint16, bytes32) view returns (uint256 cap, uint256 minted)",
-    "function totalSupplyArea(bytes32) view returns (uint256)",
+    "function totalMintedAreaYear(bytes32, uint16) view returns (uint256)",
     "function setBudget(uint16 ano, bytes32 area, uint256 cap)",
     "event AreaAdded(bytes32 indexed area)",
     "event AreaRemoved(bytes32 indexed area)",
     "event BudgetSet(uint16 indexed ano, bytes32 indexed area, uint256 cap)",
-    "event PaidCompany(address indexed agency, address indexed company, bytes32 indexed area, uint256 amount)",
+    "event PaidCompany(address indexed agency, address indexed company, uint16 indexed ano, bytes32 area, uint256 amount)",
   ];
 
   let provider, signer, contract;
@@ -154,10 +154,14 @@
     for (const log of logs) {
       try {
         const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        const area = parsed.args.area;
-        if (parsed.name === "AreaAdded") areas.set(area, true);
-        else if (parsed.name === "AreaRemoved") areas.set(area, false);
-      } catch {}
+        if (parsed && parsed.args) {
+          const area = parsed.args.area;
+          if (parsed.name === "AreaAdded") areas.set(area, true);
+          else if (parsed.name === "AreaRemoved") areas.set(area, false);
+        }
+      } catch (e) {
+        console.warn('Failed to parse area log:', e);
+      }
     }
     return [...areas.entries()].filter(([, active]) => active).map(([area]) => area);
   }
@@ -172,8 +176,14 @@
     const logs = await provider.getLogs({ address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [topic] });
     const years = new Set();
     for (const log of logs) {
-      const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-      years.add(Number(parsed.args.ano));
+      try {
+        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
+        if (parsed && parsed.args) {
+          years.add(Number(parsed.args.ano));
+        }
+      } catch (e) {
+        console.warn('Failed to parse budget log:', e);
+      }
     }
     const yearsArr = [...years].sort();
 
@@ -181,7 +191,7 @@
     for (const ano of yearsArr) {
       for (const area of areas) {
         const { cap, minted } = await contract.budget(ano, area);
-        const realized = await contract.totalSupplyArea(area).then(v => v.toString());
+        const realized = await contract.totalMintedAreaYear(area, ano).then(v => v.toString());
         html += `<tr>
           <td>${ano}</td>
           <td>${b32ToLabel(area)}</td>

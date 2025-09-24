@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agência — Transferência entre Órgãos</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.12.1/dist/ethers.umd.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Agência — Transferência entre Órgãos</h1>
+      <div class="actions">
+        <button id="connectBtn">Conectar MetaMask</button>
+        <a href="index.html">← Voltar ao Menu</a>
+      </div>
+      <div id="status" class="status"></div>
+    </header>
+
+    <main>
+      <section id="identity" class="card">
+        <h2>Identidade</h2>
+        <div>Conta: <span id="account">—</span></div>
+        <div>Rede: <span id="network">—</span></div>
+        <div>É Agência? <span id="isAgency">—</span></div>
+        <div>Nome: <span id="agencyName">—</span></div>
+      </section>
+
+      <section id="balances" class="card">
+        <h2>Saldos por Área</h2>
+        <div id="balancesTable">Carregando…</div>
+        <small class="muted">Montantes disponíveis para transferência a outras agências.</small>
+      </section>
+
+      <section id="transfer" class="card">
+        <h2>Transferir para Outra Agência</h2>
+        <div class="form-grid">
+          <div>
+            <label>Ano</label>
+            <input id="transferYear" type="number" min="2020" max="2050" placeholder="2025" />
+          </div>
+          <div>
+            <label>Área</label>
+            <select id="transferArea"></select>
+          </div>
+          <div>
+            <label>Agência Destino</label>
+            <select id="transferToAgency"></select>
+          </div>
+          <div>
+            <label>Valor</label>
+            <input id="transferAmount" type="number" min="0" step="1" placeholder="0" />
+          </div>
+        </div>
+        <button id="btnTransfer" class="primary">Transferir</button>
+        <div id="txLog" class="log"></div>
+      </section>
+    </main>
+
+    <script src="./agencia.js"></script>
+  </body>
+</html>

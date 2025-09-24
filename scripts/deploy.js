@@ -62,10 +62,10 @@ async function main() {
   await (await c.connect(owner).setTreasury(treasury.address, true)).wait();
 
   // Agências: Ministérios primeiro, depois Prefeituras (ordem para facilitar apelidos na carteira)
-  await (await c.connect(owner).setAgency(agenciaSaude.address, true)).wait();
-  await (await c.connect(owner).setAgency(agenciaEducacao.address, true)).wait();
-  await (await c.connect(owner).setAgency(prefeitura1.address, true)).wait();
-  await (await c.connect(owner).setAgency(prefeitura2.address, true)).wait();
+  await (await c.connect(owner).setAgency(agenciaSaude.address, true, "Ministério da Saúde")).wait();
+  await (await c.connect(owner).setAgency(agenciaEducacao.address, true, "Ministério da Educação")).wait();
+  await (await c.connect(owner).setAgency(prefeitura1.address, true, "Prefeitura 1")).wait();
+  await (await c.connect(owner).setAgency(prefeitura2.address, true, "Prefeitura 2")).wait();
 
   await (await c.connect(owner).setLiquidator(liquidator.address, true)).wait();
   console.log("Roles set: legislator, treasury, 4 agencies (2 Ministérios, 2 Prefeituras), liquidator.");
@@ -76,16 +76,16 @@ async function main() {
   console.log("Areas added: SAUDE, EDUCACAO.");
 
   // Upsert Companies (active = true) and enable per area
-  await (await c.connect(owner).upsertCompany(empresaSaude1.address, toBytes14("11111111111111"), true)).wait();
+  await (await c.connect(owner).upsertCompany(empresaSaude1.address, toBytes14("11111111111111"), "Empresa Saúde 1", true)).wait();
   await (await c.connect(owner).setCompanyArea(empresaSaude1.address, SAUDE, true)).wait();
 
-  await (await c.connect(owner).upsertCompany(empresaSaude2.address, toBytes14("22222222222222"), true)).wait();
+  await (await c.connect(owner).upsertCompany(empresaSaude2.address, toBytes14("22222222222222"), "Empresa Saúde 2", true)).wait();
   await (await c.connect(owner).setCompanyArea(empresaSaude2.address, SAUDE, true)).wait();
 
-  await (await c.connect(owner).upsertCompany(empresaEducacao1.address, toBytes14("33333333333333"), true)).wait();
+  await (await c.connect(owner).upsertCompany(empresaEducacao1.address, toBytes14("33333333333333"), "Empresa Educação 1", true)).wait();
   await (await c.connect(owner).setCompanyArea(empresaEducacao1.address, EDUCACAO, true)).wait();
 
-  await (await c.connect(owner).upsertCompany(empresaEducacao2.address, toBytes14("44444444444444"), true)).wait();
+  await (await c.connect(owner).upsertCompany(empresaEducacao2.address, toBytes14("44444444444444"), "Empresa Educação 2", true)).wait();
   await (await c.connect(owner).setCompanyArea(empresaEducacao2.address, EDUCACAO, true)).wait();
 
   console.log("Companies added and enabled per area: 2 Saúde, 2 Educação.");
@@ -95,16 +95,16 @@ async function main() {
   console.log("Contract:", addr);
   console.log("Areas:", "SAUDE", "EDUCACAO");
   console.log("Agencies:", {
-    MinisterioDaSaude: agenciaSaude.address,
-    MinisterioDaEducacao: agenciaEducacao.address,
-    Prefeitura1: prefeitura1.address,
-    Prefeitura2: prefeitura2.address,
+    "Ministério da Saúde": agenciaSaude.address,
+    "Ministério da Educação": agenciaEducacao.address,
+    "Prefeitura 1": prefeitura1.address,
+    "Prefeitura 2": prefeitura2.address,
   });
   console.log("Companies:", {
-    EmpresaSaude1: empresaSaude1.address,
-    EmpresaSaude2: empresaSaude2.address,
-    EmpresaEducacao1: empresaEducacao1.address,
-    EmpresaEducacao2: empresaEducacao2.address,
+    "Empresa Saúde 1": empresaSaude1.address,
+    "Empresa Saúde 2": empresaSaude2.address,
+    "Empresa Educação 1": empresaEducacao1.address,
+    "Empresa Educação 2": empresaEducacao2.address,
   });
 }
 

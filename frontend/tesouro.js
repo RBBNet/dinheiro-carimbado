@@ -9,7 +9,10 @@
     "function budget(uint16, bytes32) view returns (uint256 cap, uint256 minted)",
     "function totalSupplyArea(bytes32) view returns (uint256)",
     "function mintToAgency(address orgao, bytes32 area, uint16 ano, uint256 amount)",
-  "event RoleSet(string role, address indexed who, bool enabled)",
+    "function agencyNames(address) view returns (string)",
+    "function getCompanyName(address) view returns (string)",
+    "event RoleSet(string role, address indexed who, bool enabled)",
+    "event AgencyNameSet(address indexed agency, string name)",
     "event AreaAdded(bytes32 indexed area)",
     "event AreaRemoved(bytes32 indexed area)",
     "event BudgetSet(uint16 indexed ano, bytes32 indexed area, uint256 cap)",
@@ -65,66 +68,6 @@
     return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : '';
   }
 
-  function getCustomAgencyNames() {
-    try {
-      const map = JSON.parse(localStorage.getItem('dc_agencyNames') || '{}');
-      // normalize keys to lowercase
-      const out = {};
-      for (const k in map) out[k.toLowerCase()] = map[k];
-      return out;
-    } catch { return {}; }
-  }
-
-  function getEnsCache() {
-    try { return JSON.parse(localStorage.getItem('dc_agencyEnsCache') || '{}'); } catch { return {}; }
-  }
-
-  function setEnsCache(map) {
-    try { localStorage.setItem('dc_agencyEnsCache', JSON.stringify(map)); } catch {}
-  }
-
-  async function loadAgencyAliases() {
-    // Optional file: frontend/agency-aliases.json with {"0xabc...": "Ministério X", ...}
-    try {
-      const res = await fetch('./agency-aliases.json', { cache: 'no-cache' });
-      if (!res.ok) return;
-      const json = await res.json();
-      const existing = getCustomAgencyNames();
-      const merged = { ...existing };
-      for (const k in json) {
-        merged[k.toLowerCase()] = json[k];
-      }
-      localStorage.setItem('dc_agencyNames', JSON.stringify(merged));
-    } catch {}
-  }
-
-  function labelForAgencySync(addr) {
-    const lower = addr.toLowerCase();
-    const custom = getCustomAgencyNames();
-    if (custom[lower]) return custom[lower];
-    const ensCache = getEnsCache();
-    if (ensCache[lower]) return ensCache[lower];
-    return shorten(addr);
-  }
-
-  async function maybeResolveEns(addr, optionEl) {
-    const lower = addr.toLowerCase();
-    const custom = getCustomAgencyNames();
-    if (custom[lower]) return; // don't override custom name
-    const ensCache = getEnsCache();
-    if (ensCache[lower]) return; // already cached
-    try {
-      const name = await provider.lookupAddress(addr);
-      if (name) {
-        ensCache[lower] = name;
-        setEnsCache(ensCache);
-        if (optionEl && optionEl.value.toLowerCase() === lower) {
-          optionEl.textContent = name;
-        }
-      }
-    } catch {}
-  }
-
   async function initContract() {
     try {
   const addr = getSavedAddress();
@@ -142,11 +85,8 @@
       await renderBudgets(areas);
       await populateAreas(areas);
 
-      // agencies from RoleSet logs (or a direct map if existed)
-  await loadAgencyAliases();
-      await populateAgencies();
-
-      subscribeEvents();
+      // agencies from RoleSet logs
+      await populateAgencies();      subscribeEvents();
       setStatus("Contrato pronto.");
     } catch (e) {
       console.error(e);
@@ -163,10 +103,14 @@
     for (const log of logs) {
       try {
         const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        const area = parsed.args.area;
-        if (parsed.name === "AreaAdded") areas.set(area, true);
-        else if (parsed.name === "AreaRemoved") areas.set(area, false);
-      } catch {}
+        if (parsed && parsed.args) {
+          const area = parsed.args.area;
+          if (parsed.name === "AreaAdded") areas.set(area, true);
+          else if (parsed.name === "AreaRemoved") areas.set(area, false);
+        }
+      } catch (e) {
+        console.warn('Failed to parse area log:', e);
+      }
     }
     return [...areas.entries()].filter(([, active]) => active).map(([area]) => area);
   }
@@ -182,21 +126,24 @@
   }
 
   async function populateAgencies() {
-  // Preferir leitura direta se existir função isAgency(address). Como não temos a lista on-chain,
-  // usamos eventos RoleSet e decodificação manual
-  const topicRoleSet = ethers.id("RoleSet(string,address,bool)");
+    // Get agencies from RoleSet events
+    const topicRoleSet = ethers.id("RoleSet(string,address,bool)");
     const logs = await provider.getLogs({ address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [topicRoleSet] });
     const agencies = new Set();
     for (const log of logs) {
       try {
         const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed.args.role === "AGENCY" && parsed.args.enabled) {
-          agencies.add(parsed.args.who);
+        if (parsed && parsed.args) {
+          if (parsed.args.role === "AGENCY" && parsed.args.enabled) {
+            agencies.add(parsed.args.who);
+          }
+          if (parsed.args.role === "AGENCY" && !parsed.args.enabled) {
+            agencies.delete(parsed.args.who);
+          }
         }
-        if (parsed.args.role === "AGENCY" && !parsed.args.enabled) {
-          agencies.delete(parsed.args.who);
-        }
-      } catch {}
+      } catch (e) {
+        console.warn('Failed to parse role set log:', e);
+      }
     }
     const active = [...agencies];
     allocAgency.innerHTML = "";
@@ -207,17 +154,21 @@
       allocAgency.appendChild(opt);
       return;
     }
-    for (const a of active) {
+    
+    // Fetch names from contract and populate options
+    for (const address of active) {
       const opt = document.createElement("option");
-      opt.value = a;
-      opt.textContent = labelForAgencySync(a);
-      opt.title = a; // mostrar endereço completo no hover
+      opt.value = address;
+      opt.title = address; // show address on hover
+      
+      try {
+        const name = await contract.agencyNames(address);
+        opt.textContent = name || shorten(address);
+      } catch {
+        opt.textContent = shorten(address);
+      }
+      
       allocAgency.appendChild(opt);
-      // tentar resolver ENS de forma assíncrona e atualizar rótulo quando disponível
-      // ignora se rede não suportar ENS ou falhar
-      // não sobrescreve nome customizado salvo em localStorage
-      // fire-and-forget
-      maybeResolveEns(a, opt);
     }
   }
 
@@ -226,8 +177,14 @@
     const logs = await provider.getLogs({ address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [topic] });
     const years = new Set();
     for (const log of logs) {
-      const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-      years.add(Number(parsed.args.ano));
+      try {
+        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
+        if (parsed && parsed.args) {
+          years.add(Number(parsed.args.ano));
+        }
+      } catch (e) {
+        console.warn('Failed to parse budget log:', e);
+      }
     }
     const yearsArr = [...years].sort();
 
