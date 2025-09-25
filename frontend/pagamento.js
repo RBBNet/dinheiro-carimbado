@@ -24,8 +24,10 @@
   let account;
   let areas = [];
   let companies = new Map(); // address -> {cnpj, name, allowedAreas: Set}
+  let hackerMode = false; // Flag para modo hacker
 
   const connectBtn = $("#connectBtn");
+  const hackerLabel = $("#hackerLabel");
   const status = $("#status");
   const accountSpan = $("#account");
   const networkSpan = $("#network");
@@ -97,7 +99,8 @@
       // Check if current account is an agency
       const isAgency = await contract.isAgency(account);
       isAgencySpan.textContent = isAgency ? "Sim" : "Não";
-      btnPay.disabled = !isAgency;
+      // No modo hacker, permite pagamentos mesmo se não for agência
+      btnPay.disabled = !isAgency && !hackerMode;
 
       if (isAgency) {
         // Get agency name
@@ -269,30 +272,40 @@
     
     if (!selectedArea) return;
     
-    // Filter companies allowed for selected area
-    const allowedCompanies = [];
-    for (const [address, company] of companies.entries()) {
-      if (company.allowedAreas.has(selectedArea)) {
-        allowedCompanies.push({ address, ...company });
+    // No modo hacker, mostra TODAS as empresas, não só as permitidas para a área
+    const companiesToShow = [];
+    if (hackerMode) {
+      // Modo hacker: mostra todas as empresas cadastradas
+      for (const [address, company] of companies.entries()) {
+        companiesToShow.push({ address, ...company });
+      }
+    } else {
+      // Modo normal: só empresas permitidas para a área selecionada
+      for (const [address, company] of companies.entries()) {
+        if (company.allowedAreas.has(selectedArea)) {
+          companiesToShow.push({ address, ...company });
+        }
       }
     }
     
-    if (allowedCompanies.length === 0) {
+    if (companiesToShow.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "Nenhuma empresa habilitada para esta área";
+      opt.textContent = hackerMode ? "Nenhuma empresa cadastrada" : "Nenhuma empresa habilitada para esta área";
       paymentCompany.appendChild(opt);
       return;
     }
     
     // Sort by name
-    allowedCompanies.sort((a, b) => a.name.localeCompare(b.name));
+    companiesToShow.sort((a, b) => a.name.localeCompare(b.name));
     
-    for (const company of allowedCompanies) {
+    for (const company of companiesToShow) {
       const opt = document.createElement("option");
       opt.value = company.address;
-      opt.textContent = `${formatCNPJ(company.cnpj)} - ${company.name}`;
-      opt.title = `${company.address} - ${company.name}`;
+      const isAllowed = company.allowedAreas.has(selectedArea);
+      const prefix = hackerMode && !isAllowed ? "⚠️ " : "";
+      opt.textContent = `${prefix}${formatCNPJ(company.cnpj)} - ${company.name}`;
+      opt.title = `${company.address} - ${company.name}${hackerMode && !isAllowed ? " (NÃO HABILITADA PARA ESTA ÁREA)" : ""}`;
       paymentCompany.appendChild(opt);
     }
   }
@@ -321,18 +334,32 @@
     }
     
     try {
-      // Check current balance for the specific year
-      const currentBalance = await contract.balanceOfAreaYear(account, area, year);
-      if (currentBalance < amount) {
-        alert(`Saldo insuficiente para o ano ${year}. Disponível: ${currentBalance.toString()}`);
-        return;
-      }
-      
-      // Check if company is allowed for area
-      const isAllowed = await contract.isCompanyAllowedForArea(companyAddr, area);
-      if (!isAllowed) {
-        alert('Empresa não habilitada para esta área');
-        return;
+      // No modo hacker, pula as validações de saldo e autorização
+      if (!hackerMode) {
+        // Check current balance for the specific year
+        const currentBalance = await contract.balanceOfAreaYear(account, area, year);
+        if (currentBalance < amount) {
+          alert(`Saldo insuficiente para o ano ${year}. Disponível: ${currentBalance.toString()}`);
+          return;
+        }
+        
+        // Check if company is allowed for area
+        const isAllowed = await contract.isCompanyAllowedForArea(companyAddr, area);
+        if (!isAllowed) {
+          alert('Empresa não habilitada para esta área');
+          return;
+        }
+      } else {
+        // Modo hacker: avisos mas continua
+        const currentBalance = await contract.balanceOfAreaYear(account, area, year);
+        const isAllowed = await contract.isCompanyAllowedForArea(companyAddr, area);
+        
+        if (currentBalance < amount) {
+          txLog.textContent += `⚠️ MODO HACKER: Tentando pagar ${amount} com saldo ${currentBalance}...\n`;
+        }
+        if (!isAllowed) {
+          txLog.textContent += `⚠️ MODO HACKER: Tentando pagar empresa não autorizada...\n`;
+        }
       }
       
       const company = companies.get(companyAddr);
@@ -354,7 +381,12 @@
       txLog.textContent += `✅ Pagamento concluído! Tokens DCT mintados para ${companyName}\n`;
     } catch (e) {
       console.error(e);
-      txLog.textContent += `Falha: ${e?.message || e}\n`;
+      if (hackerMode) {
+        txLog.textContent += `💥 CONTRATO INTELIGENTE REJEITOU: ${e?.message || e}\n`;
+        txLog.textContent += `🛡️ As regras do contrato são IMUTÁVEIS - mesmo no 'modo hacker'!\n`;
+      } else {
+        txLog.textContent += `Falha: ${e?.message || e}\n`;
+      }
     }
   }
 
@@ -378,6 +410,39 @@
   // Event listeners
   connectBtn.addEventListener('click', connect);
   btnPay.addEventListener('click', onPay);
+  
+  // Hacker mode toggle com teclas secretas (Ctrl+Shift+H)
+  document.addEventListener('keydown', (e) => {
+    // Ctrl+Shift+H para ativar/desativar modo hacker
+    if (e.ctrlKey && e.shiftKey && e.key === 'H') {
+      e.preventDefault();
+      
+      hackerMode = !hackerMode;
+      
+      if (hackerMode) {
+        document.body.classList.add('hacker-mode');
+        hackerLabel.style.display = 'block';
+        // No modo hacker, habilita o botão mesmo se não for agência
+        btnPay.disabled = false;
+        txLog.textContent += `💀 MODO HACKER ATIVADO! Validações frontend desabilitadas...\n`;
+        txLog.textContent += `⚠️ ATENÇÃO: O contrato inteligente ainda aplica suas regras!\n`;
+        txLog.textContent += `🎯 Combinação secreta detectada: Ctrl+Shift+H\n\n`;
+      } else {
+        document.body.classList.remove('hacker-mode');
+        hackerLabel.style.display = 'none';
+        // Restaura a validação de agência
+        if (contract && account) {
+          contract.isAgency(account).then(isAgency => {
+            btnPay.disabled = !isAgency;
+          });
+        }
+        txLog.textContent += `🛡️ Modo hacker desativado. Validações restauradas.\n\n`;
+      }
+      
+      // Atualiza a lista de empresas para refletir o modo atual
+      updateCompanyDropdown();
+    }
+  });
   
   // Auto-select area when balance is clicked (convenience)
   balancesTable.addEventListener('click', (e) => {
