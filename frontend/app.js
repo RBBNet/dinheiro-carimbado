@@ -35,6 +35,40 @@
 
   function setStatus(text) { status.textContent = text; }
 
+  // Helper: safely fetch logs in pages to avoid RPC range limits
+  async function getLogsSafe(baseFilter, options = {}) {
+    const step = BigInt(options.step || 5000); // blocks per query
+    const lookback = BigInt(options.lookback || 100000); // total blocks to scan if deploy block unknown
+
+    const latest = BigInt(await provider.getBlockNumber());
+    // If user stored deploy block, start from there; else limited lookback
+    let fromStored = 0n;
+    try {
+      const stored = localStorage.getItem("dc_deploy_block");
+      if (stored) fromStored = BigInt(stored);
+    } catch {}
+
+    const fromBlock = baseFilter.fromBlock != null
+      ? BigInt(baseFilter.fromBlock)
+      : (fromStored > 0n ? fromStored : (latest > lookback ? latest - lookback : 0n));
+    const toBlock = baseFilter.toBlock != null ? (baseFilter.toBlock === "latest" ? latest : BigInt(baseFilter.toBlock)) : latest;
+
+    const logs = [];
+    for (let start = fromBlock; start <= toBlock; start += step + 1n) {
+      const end = start + step > toBlock ? toBlock : start + step;
+      const f = { ...baseFilter, fromBlock: start, toBlock: end };
+      try {
+        const page = await provider.getLogs(f);
+        if (page && page.length) logs.push(...page);
+      } catch (err) {
+        // If a page fails due to provider limits, break to avoid loops
+        console.warn("getLogsSafe: page fetch failed", err);
+        break;
+      }
+    }
+    return logs;
+  }
+
   // Read-only: contract address is managed on the menu page
   function getSavedAddress() {
     return localStorage.getItem("dc_contract") || "";
@@ -144,12 +178,12 @@
     submitBudget.disabled = !isLeg;
   }
 
-  // Descobrir áreas olhando os eventos (desde o bloco 0, ambiente local)
+  // Descobrir áreas olhando os eventos (janela segura para evitar limites do RPC)
   async function discoverAreas() {
     const topicAdded = contract.interface.getEvent("AreaAdded").topicHash;
     const topicRemoved = contract.interface.getEvent("AreaRemoved").topicHash;
-    const filter = { address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [[topicAdded, topicRemoved]] };
-    const logs = await provider.getLogs(filter);
+    const filter = { address: contract.target, topics: [[topicAdded, topicRemoved]] };
+    const logs = await getLogsSafe(filter);
     const areas = new Map(); // bytes32 -> active
     for (const log of logs) {
       try {
@@ -173,7 +207,7 @@
   async function renderBudgets(areas) {
     // Descobrir anos definidos via BudgetSet
     const topic = contract.interface.getEvent("BudgetSet").topicHash;
-    const logs = await provider.getLogs({ address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [topic] });
+  const logs = await getLogsSafe({ address: contract.target, topics: [topic] });
     const years = new Set();
     for (const log of logs) {
       try {
