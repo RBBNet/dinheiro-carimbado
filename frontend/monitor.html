@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Monitoramento - Dinheiro Carimbado</title>
+  <link rel="stylesheet" href="monitor.css">
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <header class="monitor-header">
+    <div class="header-content">
+      <h1><span class="icon">📡</span> Sistema de Monitoramento Blockchain</h1>
+      <div class="status-indicator">
+        <div id="connectionStatus" class="status-dot offline"></div>
+        <span id="statusText">Desconectado</span>
+      </div>
+    </div>
+    <div class="network-info">
+      <span>Rede: <span id="networkName">—</span></span>
+      <span>Contrato: <span id="contractAddress">—</span></span>
+      <span>Último Bloco: <span id="lastBlock">—</span></span>
+    </div>
+  </header>
+
+  <main class="monitor-main">
+    <section class="controls">
+      <button id="connectBtn" class="btn-primary">🔌 Conectar ao Blockchain</button>
+      <button id="clearBtn" class="btn-secondary">🗑️ Limpar Log</button>
+      <div class="filters">
+        <label>
+          <input type="checkbox" id="filterCompanyUpsert" checked> CompanyUpsert
+        </label>
+        <label>
+          <input type="checkbox" id="filterCompanyAreaSet" checked> CompanyAreaSet
+        </label>
+        <label>
+          <input type="checkbox" id="filterBudgetSet" checked> BudgetSet
+        </label>
+        <label>
+          <input type="checkbox" id="filterMintToAgency" checked> MintToAgency
+        </label>
+        <label>
+          <input type="checkbox" id="filterTransferAreaYear" checked> TransferAreaYear
+        </label>
+        <label>
+          <input type="checkbox" id="filterPaidCompany" checked> PaidCompany
+        </label>
+      </div>
+    </section>
+
+    <section class="events-container">
+      <h2>📊 Log de Eventos em Tempo Real</h2>
+      <div id="eventsLog" class="events-log">
+        <div class="welcome-message">
+          <div class="pulse-icon">📡</div>
+          <p>Sistema de monitoramento iniciado</p>
+          <p class="subtitle">Conecte-se ao blockchain para começar a monitorar eventos</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="monitor-footer">
+    <p>🛡️ Sistema de Auditoria e Compliance | Dinheiro Carimbado Blockchain Monitor</p>
+  </footer>
+
+  <script src="monitor.js"></script>
+</body>
+</html>
