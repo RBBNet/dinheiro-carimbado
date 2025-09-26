@@ -13,7 +13,7 @@
     "node": "hardhat node",
     "deploy:notpersistent": "hardhat run scripts/deploy.js --network hardhat",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
-    "deploy:rbb": "hardhat run scripts/deploy.js --network rbb_lab",
+    "deploy:rbblab": "hardhat run scripts/deploy.js --network rbb_lab",
     "test": "hardhat test",
     "test:deployment": "hardhat test test/simple-deployment.test.js",
     "test:frontend": "hardhat test test/frontend-validation.test.js",

@@ -15,7 +15,7 @@ async function verifyContractDeployment(contractAddress = null) {
     console.log("📊 Informações da rede:");
     console.log(`   - Nome: ${network.name}`);
     console.log(`   - Chain ID: ${network.chainId}`);
-    console.log(`   - Deployer: ${deployer.address}`);
+    // console.log(`   - Deployer: ${deployer.address}`);
     console.log("");
 
     let dinheiroCarimbado;
@@ -138,6 +138,131 @@ async function verifyContractDeployment(contractAddress = null) {
       console.log(`   - ABI do frontend: ❌ Incompatível (${error.message})`);
     }
 
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    // NOVO BLOCO: Verificação detalhada da ABI do contrato DinheiroCarimbado
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    (function fullAbiCheck() {
+      console.log("\n🧩 Verificação completa da ABI:");
+
+      // Funções esperadas (assinatura nome(tipo,...); sem retornos)
+      const expectedFunctions = [
+        // getters / state
+        "token()",
+        "tokenScale()",
+        "owner()",
+        "isLegislator(address)",
+        "isTreasury(address)",
+        "isAgency(address)",
+        "isLiquidator(address)",
+        "agencyNames(address)",
+        "isArea(bytes32)",
+        "getAreas()",
+        "isCompany(address)",
+        "isCompanyAllowedForArea(address,bytes32)",
+        "getCompanyName(address)",
+        "getTotalBalanceByArea(address,bytes32)",
+        "getBalanceByAreaYear(address,bytes32,uint16)",
+        "budget(uint16,bytes32)",
+        "getBudgetYears()",
+        "getBudgetsForYear(uint16)",
+        "getAllBudgets()",
+        "remaining(uint16,bytes32)",
+        "balanceOfAreaYear(address,bytes32,uint16)",
+        "totalSupplyAreaYear(bytes32,uint16)",
+        "totalMintedAreaYear(bytes32,uint16)",
+
+        // mutating / admin
+        "setLegislator(address,bool)",
+        "setTreasury(address,bool)",
+        "setAgency(address,bool,string)",
+        "setLiquidator(address,bool)",
+        "addArea(bytes32)",
+        "removeArea(bytes32)",
+        "upsertCompany(address,bytes14,string,bool)",
+        "setCompanyArea(address,bytes32,bool)",
+        "mintToAgency(address,bytes32,uint16,uint256)",
+        "transferAgencyToAgency(address,bytes32,uint16,uint256)",
+        "payCompany(address,bytes32,uint16,uint256)",
+        "settle(address,bytes32,uint16,uint256,bytes32)",
+        "transferOwnership(address)"
+      ];
+
+      // Eventos esperados
+      const expectedEvents = [
+        "RoleSet(string,address,bool)",
+        "AgencyNameSet(address,string)",
+        "AreaAdded(bytes32)",
+        "AreaRemoved(bytes32)",
+        "CompanyUpsert(address,bytes14,string,bool)",
+        "CompanyAreaSet(address,bytes32,bool)",
+        "BudgetSet(uint16,bytes32,uint256)",
+        "MintToAgency(address,bytes32,uint16,uint256)",
+        "TransferAreaYear(address,address,uint16,bytes32,uint256)",
+        "PaidCompany(address,address,uint16,bytes32,uint256)",
+        "Settled(address,bytes32,uint16,uint256,bytes32)"
+      ];
+
+      // Utilidades para normalizar assinaturas
+      const fragments = dinheiroCarimbado.interface.fragments;
+
+      const fnFragments = fragments.filter(f => f.type === "function");
+      const evFragments = fragments.filter(f => f.type === "event");
+
+      const sigFn = (f) => `${f.name}(${f.inputs.map(i => i.type).join(",")})`;
+      const sigEv = (f) => `${f.name}(${f.inputs.map(i => i.type).join(",")})`;
+
+      const actualFunctions = new Set(fnFragments.map(sigFn));
+      const actualEvents = new Set(evFragments.map(sigEv));
+
+      const missingFunctions = expectedFunctions.filter(f => !actualFunctions.has(f));
+      const unexpectedFunctions = [...actualFunctions].filter(f => !expectedFunctions.includes(f));
+
+      const missingEvents = expectedEvents.filter(e => !actualEvents.has(e));
+      const unexpectedEvents = [...actualEvents].filter(e => !expectedEvents.includes(e));
+
+      console.log("   Funções esperadas:", expectedFunctions.length);
+      console.log("   Funções encontradas:", actualFunctions.size);
+      console.log("   Eventos esperados:", expectedEvents.length);
+      console.log("   Eventos encontrados:", actualEvents.size);
+
+      if (!missingFunctions.length && !missingEvents.length) {
+        console.log("   ✅ Todas as funções e eventos esperados estão presentes.");
+      } else {
+        if (missingFunctions.length)
+          console.log("   ❌ Funções ausentes:", missingFunctions.join("; "));
+        if (missingEvents.length)
+          console.log("   ❌ Eventos ausentes:", missingEvents.join("; "));
+      }
+
+      if (unexpectedFunctions.length) {
+        console.log("   ⚠️ Funções adicionais (não listadas como esperadas):", unexpectedFunctions.join("; "));
+      }
+      if (unexpectedEvents.length) {
+        console.log("   ⚠️ Eventos adicionais (não listados como esperados):", unexpectedEvents.join("; "));
+      }
+
+      // Checagem especial: assinatura de array complexa (getAllBudgets)
+      const hasGetAllBudgets = actualFunctions.has("getAllBudgets()");
+      if (hasGetAllBudgets) {
+        const f = fnFragments.find(f => sigFn(f) === "getAllBudgets()");
+        const returnsTupleArray = f?.outputs?.[0]?.baseType === "array" &&
+          /tuple/.test(f.outputs[0].type || "");
+        console.log(`   Detalhe getAllBudgets(): ${returnsTupleArray ? "✅ Retorna array de tuplas" : "⚠️ Formato inesperado"}`);
+      } else {
+        console.log("   ⚠️ getAllBudgets() não encontrado para validação estrutural.");
+      }
+
+      // Expor resultado resumido para uso posterior no script
+      dinheiroCarimbado.__abiCheck = {
+        missingFunctions,
+        missingEvents,
+        unexpectedFunctions,
+        unexpectedEvents,
+        ok: !missingFunctions.length && !missingEvents.length
+      };
+    })();
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
     console.log("\n📈 Estatísticas:");
     
     // 10. Estatísticas de gas - simplified version
@@ -176,66 +301,37 @@ async function verifyContractDeployment(contractAddress = null) {
   }
 }
 
-// Se executado diretamente
-if (require.main === module) {
-  const contractAddress = process.argv[2];
+// Se executado diretamente via Hardhat
+async function main() {
+  // Para usar com hardhat run, passe o endereço como variável de ambiente:
+  // CONTRACT_ADDRESS=0x1234... npx hardhat run scripts/verify-deployment.js --network rbb_lab
+  const contractAddress = process.env.CONTRACT_ADDRESS;
   
   if (contractAddress) {
     console.log(`Verificando contrato existente: ${contractAddress}\n`);
   } else {
     console.log("Fazendo deploy e verificando novo contrato\n");
+    console.log("💡 Para verificar um contrato específico, use:");
+    console.log("   CONTRACT_ADDRESS=0x1234... npx hardhat run scripts/verify-deployment.js --network rbb_lab\n");
   }
   
-  verifyContractDeployment(contractAddress)
-    .then((result) => {
-      if (result.success) {
-        console.log("\n✅ Script executado com sucesso!");
-        process.exit(0);
-      } else {
-        console.log("\n❌ Script falhou!");
-        process.exit(1);
-      }
-    })
-    .catch((error) => {
-      console.error("❌ Erro fatal:", error);
-      process.exit(1);
-    });
+  const result = await verifyContractDeployment(contractAddress);
+  
+  if (result.success) {
+    console.log("\n✅ Script executado com sucesso!");
+    process.exit(0);
+  } else {
+    console.log("\n❌ Script falhou!");
+    process.exit(1);
+  }
+}
+
+// Se executado diretamente
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("❌ Erro fatal:", error);
+    process.exit(1);
+  });
 }
 
 module.exports = { verifyContractDeployment };
-
-describe("scripts/verify-deployment.js", function () {
-  it("faz deploy efêmero e verifica com sucesso", async function () {
-    const res = await verifyContractDeployment();
-    expect(res.success).to.equal(true);
-    expect(res.contractAddress).to.match(/^0x[0-9a-fA-F]{40}$/);
-    expect(res.tokenAddress).to.match(/^0x[0-9a-fA-F]{40}$/);
-  });
-
-  it("falha para endereço sem contrato", async function () {
-    const { ethers } = require("hardhat");
-    const bogus = ethers.Wallet.createRandom().address;
-    const res = await verifyContractDeployment(bogus);
-    expect(res.success).to.equal(false);
-    expect(res.error).to.match(/contrato/i);
-  });
-});
-
-describe("Presença de bytecode", function () {
-  it("tem bytecode no endereço implantado", async function () {
-    const [deployer] = await ethers.getSigners();
-    const Factory = await ethers.getContractFactory("DinheiroCarimbado");
-    const c = await Factory.deploy(deployer.address);
-    await c.waitForDeployment();
-    const addr = await c.getAddress();
-    const code = await ethers.provider.getCode(addr);
-    expect(code).to.be.a("string");
-    expect(code).to.not.equal("0x");
-  });
-
-  it("não tem bytecode em EOA aleatório", async function () {
-    const eoa = ethers.Wallet.createRandom().address;
-    const code = await ethers.provider.getCode(eoa);
-    expect(code).to.equal("0x");
-  });
-});
