@@ -60,9 +60,9 @@ describe("Complete End-to-End Deployment Verification", function() {
     // Test with frontend ABI
     const frontendAbi = [
       "function isLegislator(address) view returns (bool)",
-      "function isArea(bytes32) view returns (bool)", 
       "function budget(uint16, bytes32) view returns (uint256 cap, uint256 minted)",
-      "function totalSupplyArea(bytes32) view returns (uint256)"
+      "function getAreas() view returns (bytes32[])",
+      "function getBudgetYears() view returns (uint16[])"
     ];
     
     const frontendContract = new ethers.Contract(contractAddress, frontendAbi, owner);
@@ -122,25 +122,9 @@ describe("Complete End-to-End Deployment Verification", function() {
     // 8. SIMULATE AREA DISCOVERY (like frontend does)
     console.log("\n🔍 STEP 7: Simulating Frontend Area Discovery");
     
-    const topicAdded = dinheiroCarimbado.interface.getEvent("AreaAdded").topicHash;
-    const filter = {
-      address: contractAddress,
-      fromBlock: 0,
-      toBlock: "latest",
-      topics: [topicAdded]
-    };
-    
-    const logs = await ethers.provider.getLogs(filter);
-    const discoveredAreas = logs.map(log => {
-      const parsed = dinheiroCarimbado.interface.parseLog({
-        topics: log.topics,
-        data: log.data
-      });
-      return parsed.args.area;
-    });
-    
+    const discoveredAreas = await dinheiroCarimbado.getAreas();
     expect(discoveredAreas).to.have.lengthOf(2);
-    console.log(`✅ Discovered ${discoveredAreas.length} areas via events`);
+    console.log(`✅ Discovered ${discoveredAreas.length} areas via view function`);
 
     // 9. TEST ACTUAL WORKFLOW
     console.log("\n💸 STEP 8: Testing Full Workflow");

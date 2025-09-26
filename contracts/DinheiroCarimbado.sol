@@ -39,6 +39,8 @@ contract DinheiroCarimbado {
 
     // --------- Áreas ---------
     mapping(bytes32 => bool) public isArea;
+    bytes32[] private areaRegistry;
+    mapping(bytes32 => bool) private areaSeen;
     event AreaAdded(bytes32 indexed area);
     event AreaRemoved(bytes32 indexed area);
 
@@ -46,6 +48,10 @@ contract DinheiroCarimbado {
         require(area != bytes32(0), "invalid area");
         require(!isArea[area], "exists");
         isArea[area] = true;
+        if (!areaSeen[area]) {
+            areaSeen[area] = true;
+            areaRegistry.push(area);
+        }
         emit AreaAdded(area);
     }
 
@@ -53,6 +59,26 @@ contract DinheiroCarimbado {
         require(isArea[area], "not exists");
         isArea[area] = false;
         emit AreaRemoved(area);
+    }
+
+    function getAreas() external view returns (bytes32[] memory activeAreas) {
+        uint256 count = 0;
+        uint256 len = areaRegistry.length;
+        for (uint256 i = 0; i < len; i++) {
+            if (isArea[areaRegistry[i]]) {
+                count++;
+            }
+        }
+
+        activeAreas = new bytes32[](count);
+        uint256 index = 0;
+        for (uint256 i = 0; i < len; i++) {
+            bytes32 area = areaRegistry[i];
+            if (isArea[area]) {
+                activeAreas[index] = area;
+                index++;
+            }
+        }
     }
 
     // --------- Cadastros de Orgaos e Empresas ---------
@@ -110,6 +136,18 @@ contract DinheiroCarimbado {
     // anoFiscal => area => {teto, emitido}
     struct Budget { uint256 cap; uint256 minted; }
     mapping(uint16 => mapping(bytes32 => Budget)) public budget;
+    uint16[] private budgetYears;
+    mapping(uint16 => bool) private budgetYearSeen;
+    mapping(uint16 => bytes32[]) private budgetAreasByYear;
+    mapping(uint16 => mapping(bytes32 => bool)) private budgetAreaSeen;
+
+    struct BudgetView {
+        uint16 ano;
+        bytes32 area;
+        uint256 cap;
+        uint256 minted;
+        uint256 realized;
+    }
 
     event BudgetSet(uint16 indexed ano, bytes32 indexed area, uint256 cap);
 
@@ -117,6 +155,14 @@ contract DinheiroCarimbado {
         require(isLegislator[msg.sender], "not legislator");
         require(isArea[area], "invalid area");
         budget[ano][area].cap = cap;
+        if (!budgetYearSeen[ano]) {
+            budgetYearSeen[ano] = true;
+            budgetYears.push(ano);
+        }
+        if (!budgetAreaSeen[ano][area]) {
+            budgetAreaSeen[ano][area] = true;
+            budgetAreasByYear[ano].push(area);
+        }
         emit BudgetSet(ano, area, cap);
     }
 
@@ -124,6 +170,65 @@ contract DinheiroCarimbado {
         Budget memory b = budget[ano][area];
         if (b.minted >= b.cap) return 0;
         return b.cap - b.minted;
+    }
+
+    function getBudgetYears() external view returns (uint16[] memory) {
+        return budgetYears;
+    }
+
+    function getBudgetsForYear(uint16 ano)
+        external
+        view
+        returns (
+            bytes32[] memory areas,
+            uint256[] memory caps,
+            uint256[] memory mintedValues,
+            uint256[] memory realizedValues
+        )
+    {
+        bytes32[] storage storedAreas = budgetAreasByYear[ano];
+        uint256 len = storedAreas.length;
+        areas = new bytes32[](len);
+        caps = new uint256[](len);
+        mintedValues = new uint256[](len);
+        realizedValues = new uint256[](len);
+
+        for (uint256 i = 0; i < len; i++) {
+            bytes32 area = storedAreas[i];
+            Budget storage b = budget[ano][area];
+            areas[i] = area;
+            caps[i] = b.cap;
+            mintedValues[i] = b.minted;
+            realizedValues[i] = totalMintedAreaYear[area][ano];
+        }
+    }
+
+    function getAllBudgets() external view returns (BudgetView[] memory entries) {
+        uint256 total = 0;
+        uint256 yearsLen = budgetYears.length;
+        for (uint256 i = 0; i < yearsLen; i++) {
+            total += budgetAreasByYear[budgetYears[i]].length;
+        }
+
+        entries = new BudgetView[](total);
+        uint256 index = 0;
+        for (uint256 i = 0; i < yearsLen; i++) {
+            uint16 ano = budgetYears[i];
+            bytes32[] storage areasForYear = budgetAreasByYear[ano];
+            uint256 len = areasForYear.length;
+            for (uint256 j = 0; j < len; j++) {
+                bytes32 area = areasForYear[j];
+                Budget storage b = budget[ano][area];
+                entries[index] = BudgetView({
+                    ano: ano,
+                    area: area,
+                    cap: b.cap,
+                    minted: b.minted,
+                    realized: totalMintedAreaYear[area][ano]
+                });
+                index++;
+            }
+        }
     }
 
     // --------- Saldos por Área e Ano ---------

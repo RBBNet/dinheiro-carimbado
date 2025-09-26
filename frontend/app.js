@@ -5,14 +5,13 @@
   // Minimal ABI slice
   const abi = [
     "function isLegislator(address) view returns (bool)",
-    "function isArea(bytes32) view returns (bool)",
     "function budget(uint16, bytes32) view returns (uint256 cap, uint256 minted)",
     "function totalMintedAreaYear(bytes32, uint16) view returns (uint256)",
+    "function getAreas() view returns (bytes32[])",
+    "function getBudgetYears() view returns (uint16[])",
+    "function getBudgetsForYear(uint16 ano) view returns (bytes32[] areas, uint256[] caps, uint256[] mintedValues, uint256[] realizedValues)",
     "function setBudget(uint16 ano, bytes32 area, uint256 cap)",
-    "event AreaAdded(bytes32 indexed area)",
-    "event AreaRemoved(bytes32 indexed area)",
     "event BudgetSet(uint16 indexed ano, bytes32 indexed area, uint256 cap)",
-    "event PaidCompany(address indexed agency, address indexed company, uint16 indexed ano, bytes32 area, uint256 amount)",
   ];
 
   let provider, signer, contract;
@@ -34,40 +33,6 @@
   const txLog = $("#txLog");
 
   function setStatus(text) { status.textContent = text; }
-
-  // Helper: safely fetch logs in pages to avoid RPC range limits
-  async function getLogsSafe(baseFilter, options = {}) {
-    const step = BigInt(options.step || 5000); // blocks per query
-    const lookback = BigInt(options.lookback || 100000); // total blocks to scan if deploy block unknown
-
-    const latest = BigInt(await provider.getBlockNumber());
-    // If user stored deploy block, start from there; else limited lookback
-    let fromStored = 0n;
-    try {
-      const stored = localStorage.getItem("dc_deploy_block");
-      if (stored) fromStored = BigInt(stored);
-    } catch {}
-
-    const fromBlock = baseFilter.fromBlock != null
-      ? BigInt(baseFilter.fromBlock)
-      : (fromStored > 0n ? fromStored : (latest > lookback ? latest - lookback : 0n));
-    const toBlock = baseFilter.toBlock != null ? (baseFilter.toBlock === "latest" ? latest : BigInt(baseFilter.toBlock)) : latest;
-
-    const logs = [];
-    for (let start = fromBlock; start <= toBlock; start += step + 1n) {
-      const end = start + step > toBlock ? toBlock : start + step;
-      const f = { ...baseFilter, fromBlock: start, toBlock: end };
-      try {
-        const page = await provider.getLogs(f);
-        if (page && page.length) logs.push(...page);
-      } catch (err) {
-        // If a page fails due to provider limits, break to avoid loops
-        console.warn("getLogsSafe: page fetch failed", err);
-        break;
-      }
-    }
-    return logs;
-  }
 
   // Read-only: contract address is managed on the menu page
   function getSavedAddress() {
@@ -121,7 +86,7 @@
     console.log("initContract: Iniciando inicialização do contrato...");
     setStatus("Iniciando contrato...");
     try {
-  const addr = getSavedAddress();
+      const addr = getSavedAddress();
       console.log("initContract: Endereço informado:", addr);
       if (!addr) {
         console.warn("initContract: Endereço do contrato vazio");
@@ -178,26 +143,15 @@
     submitBudget.disabled = !isLeg;
   }
 
-  // Descobrir áreas olhando os eventos (janela segura para evitar limites do RPC)
+  // Descobrir áreas lendo diretamente do contrato (sem varredura de eventos)
   async function discoverAreas() {
-    const topicAdded = contract.interface.getEvent("AreaAdded").topicHash;
-    const topicRemoved = contract.interface.getEvent("AreaRemoved").topicHash;
-    const filter = { address: contract.target, topics: [[topicAdded, topicRemoved]] };
-    const logs = await getLogsSafe(filter);
-    const areas = new Map(); // bytes32 -> active
-    for (const log of logs) {
-      try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args) {
-          const area = parsed.args.area;
-          if (parsed.name === "AreaAdded") areas.set(area, true);
-          else if (parsed.name === "AreaRemoved") areas.set(area, false);
-        }
-      } catch (e) {
-        console.warn('Failed to parse area log:', e);
-      }
+    try {
+      const list = await contract.getAreas();
+      return Array.from(list || []);
+    } catch (e) {
+      console.warn("discoverAreas: falha ao consultar getAreas", e);
+      return [];
     }
-    return [...areas.entries()].filter(([, active]) => active).map(([area]) => area);
   }
 
   function b32ToLabel(b32) {
@@ -205,33 +159,50 @@
   }
 
   async function renderBudgets(areas) {
-    // Descobrir anos definidos via BudgetSet
-    const topic = contract.interface.getEvent("BudgetSet").topicHash;
-  const logs = await getLogsSafe({ address: contract.target, topics: [topic] });
-    const years = new Set();
-    for (const log of logs) {
-      try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args) {
-          years.add(Number(parsed.args.ano));
-        }
-      } catch (e) {
-        console.warn('Failed to parse budget log:', e);
-      }
+    let years = [];
+    try {
+      const rawYears = await contract.getBudgetYears();
+      years = Array.from(rawYears || []).map((y) => Number(y));
+    } catch (e) {
+      console.warn("renderBudgets: falha ao consultar getBudgetYears", e);
     }
-    const yearsArr = [...years].sort();
+
+    const yearsArr = years.sort((a, b) => a - b);
+    if (!yearsArr.length) {
+      budgetsTable.textContent = 'Nenhum orçamento definido.';
+      return;
+    }
 
     let html = '<table><thead><tr><th>Ano</th><th>Área</th><th>Cap</th><th>Emitido</th><th>Realizado</th></tr></thead><tbody>';
     for (const ano of yearsArr) {
-      for (const area of areas) {
-        const { cap, minted } = await contract.budget(ano, area);
-        const realized = await contract.totalMintedAreaYear(area, ano).then(v => v.toString());
+      let result;
+      try {
+        result = await contract.getBudgetsForYear(ano);
+      } catch (e) {
+        console.warn(`renderBudgets: falha ao consultar getBudgetsForYear(${ano})`, e);
+        continue;
+      }
+
+      const yearAreas = Array.from(result.areas || result[0] || []);
+      const caps = Array.from(result.caps || result[1] || []).map((v) => BigInt(v));
+      const mintedVals = Array.from(result.mintedValues || result[2] || []).map((v) => BigInt(v));
+      const realizedVals = Array.from(result.realizedValues || result[3] || []).map((v) => BigInt(v));
+
+      const areaIndex = new Map();
+      yearAreas.forEach((area, idx) => areaIndex.set(area, idx));
+
+      const displayAreas = Array.from(new Set([...areas, ...yearAreas]));
+      for (const area of displayAreas) {
+        const idx = areaIndex.has(area) ? areaIndex.get(area) : -1;
+        const cap = idx >= 0 ? caps[idx] : 0n;
+        const minted = idx >= 0 ? mintedVals[idx] : 0n;
+        const realized = idx >= 0 ? realizedVals[idx] : 0n;
         html += `<tr>
           <td>${ano}</td>
           <td>${b32ToLabel(area)}</td>
-          <td>${cap}</td>
-          <td>${minted}</td>
-          <td>${realized}</td>
+          <td>${cap.toString()}</td>
+          <td>${minted.toString()}</td>
+          <td>${realized.toString()}</td>
         </tr>`;
       }
     }

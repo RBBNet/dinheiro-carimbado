@@ -159,41 +159,8 @@ describe("Simple Deployment Verification", function() {
       // Remove one area
       await dinheiroCarimbado.removeArea(educacao);
       
-      // Simulate frontend area discovery
-      const topicAdded = dinheiroCarimbado.interface.getEvent("AreaAdded").topicHash;
-      const topicRemoved = dinheiroCarimbado.interface.getEvent("AreaRemoved").topicHash;
-      
-      const filter = {
-        address: contractAddress,
-        fromBlock: 0,
-        toBlock: "latest",
-        topics: [[topicAdded, topicRemoved]]
-      };
-      
-      const logs = await ethers.provider.getLogs(filter);
-      const areas = new Map();
-      
-      for (const log of logs) {
-        try {
-          const parsed = dinheiroCarimbado.interface.parseLog({
-            topics: log.topics,
-            data: log.data
-          });
-          const area = parsed.args.area;
-          if (parsed.name === "AreaAdded") {
-            areas.set(area, true);
-          } else if (parsed.name === "AreaRemoved") {
-            areas.set(area, false);
-          }
-        } catch (error) {
-          // Ignore parsing errors
-        }
-      }
-      
-      const activeAreas = [...areas.entries()]
-        .filter(([, active]) => active)
-        .map(([area]) => area);
-      
+      const activeAreas = await dinheiroCarimbado.getAreas();
+
       // Should only have SAUDE (EDUCACAO was removed)
       expect(activeAreas).to.have.lengthOf(1);
       expect(activeAreas[0]).to.equal(saude);

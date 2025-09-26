@@ -104,91 +104,47 @@ describe("Complete Integration Test - Deploy to Frontend", function() {
     console.log("8. Testing frontend ABI compatibility...");
     const frontendAbi = [
       "function isLegislator(address) view returns (bool)",
-      "function isArea(bytes32) view returns (bool)",
       "function budget(uint16, bytes32) view returns (uint256 cap, uint256 minted)",
-      "function totalSupplyArea(bytes32) view returns (uint256)",
+      "function getAreas() view returns (bytes32[])",
+      "function getBudgetYears() view returns (uint16[])",
+      "function getBudgetsForYear(uint16 ano) view returns (bytes32[] areas, uint256[] caps, uint256[] mintedValues, uint256[] realizedValues)",
       "function setBudget(uint16 ano, bytes32 area, uint256 cap)",
-      "event AreaAdded(bytes32 indexed area)",
-      "event AreaRemoved(bytes32 indexed area)",
       "event BudgetSet(uint16 indexed ano, bytes32 indexed area, uint256 cap)",
-      "event PaidCompany(address indexed agency, address indexed company, bytes32 indexed area, uint256 amount)",
     ];
     
     const frontendContract = new ethers.Contract(contractAddress, frontendAbi, legislator);
     
     // Test all frontend methods
     expect(await frontendContract.isLegislator(legislator.address)).to.be.true;
-    expect(await frontendContract.isArea(saude)).to.be.true;
-    
     const frontendBudget = await frontendContract.budget(2024, saude);
     expect(frontendBudget[0]).to.equal(1000000n);
-    
-    expect(await frontendContract.totalSupplyArea(saude)).to.equal(0n);
+    const frontendAreas = await frontendContract.getAreas();
+    expect(frontendAreas).to.include(saude);
     console.log("   ✅ Frontend ABI compatibility verified");
     
     // 9. SIMULATE AREA DISCOVERY (like frontend does)
     console.log("9. Simulating area discovery...");
     
-    const topicAdded = frontendContract.interface.getEvent("AreaAdded").topicHash;
-    const topicRemoved = frontendContract.interface.getEvent("AreaRemoved").topicHash;
-    const filter = {
-      address: contractAddress,
-      fromBlock: 0,
-      toBlock: "latest",
-      topics: [[topicAdded, topicRemoved]]
-    };
-    
-    const logs = await ethers.provider.getLogs(filter);
-    const areas = new Map();
-    
-    for (const log of logs) {
-      try {
-        const parsed = frontendContract.interface.parseLog({
-          topics: log.topics,
-          data: log.data
-        });
-        const area = parsed.args.area;
-        if (parsed.name === "AreaAdded") {
-          areas.set(area, true);
-        } else if (parsed.name === "AreaRemoved") {
-          areas.set(area, false);
-        }
-      } catch (error) {
-        // Ignore parsing errors
-      }
-    }
-    
-    const discoveredAreas = [...areas.entries()]
-      .filter(([, active]) => active)
-      .map(([area]) => area);
-    
+    const discoveredAreas = await dinheiroCarimbado.getAreas();
     expect(discoveredAreas).to.have.lengthOf(2);
     expect(discoveredAreas).to.include(saude);
     expect(discoveredAreas).to.include(educacao);
     console.log("   ✅ Area discovery working");
-    
+
     // 10. SIMULATE BUDGET DISCOVERY (like frontend does)
     console.log("10. Simulating budget discovery...");
-    
-    const budgetTopic = frontendContract.interface.getEvent("BudgetSet").topicHash;
-    const budgetLogs = await ethers.provider.getLogs({
-      address: contractAddress,
-      fromBlock: 0,
-      toBlock: "latest",
-      topics: [budgetTopic]
-    });
-    
-    const years = new Set();
-    for (const log of budgetLogs) {
-      const parsed = frontendContract.interface.parseLog({
-        topics: log.topics,
-        data: log.data
-      });
-      years.add(Number(parsed.args.ano));
-    }
-    
-    const yearArray = [...years].sort();
+
+    const rawYears = await dinheiroCarimbado.getBudgetYears();
+    const yearArray = Array.from(rawYears).map((y) => Number(y)).sort();
     expect(yearArray).to.deep.equal([2024]);
+
+    const budgetsFor2024 = await dinheiroCarimbado.getBudgetsForYear(2024);
+    const idxSaude = budgetsFor2024.areas.findIndex((a) => a === saude);
+    const idxEducacao = budgetsFor2024.areas.findIndex((a) => a === educacao);
+    expect(idxSaude).to.be.gte(0);
+    expect(idxEducacao).to.be.gte(0);
+    expect(budgetsFor2024.caps[idxSaude]).to.equal(1000000n);
+    expect(budgetsFor2024.caps[idxEducacao]).to.equal(500000n);
     console.log("   ✅ Budget discovery working");
     
     // 11. TEST TRANSACTION FUNCTIONALITY

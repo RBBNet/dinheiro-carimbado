@@ -62,13 +62,15 @@ describe("Frontend Contract Validation", function() {
       await expect(assertContractDeployed(contractAddress)).to.not.be.rejected;
 
       // Create contract instance like frontend does
-      const minimalAbi = [
-        "function isLegislator(address) view returns (bool)",
-        "function isArea(bytes32) view returns (bool)",
-        "function budget(uint16, bytes32) view returns (uint256 cap, uint256 minted)",
-        "function totalSupplyArea(bytes32) view returns (uint256)",
-        "function setBudget(uint16 ano, bytes32 area, uint256 cap)",
-      ];
+        const minimalAbi = [
+          "function isLegislator(address) view returns (bool)",
+          "function isArea(bytes32) view returns (bool)",
+          "function budget(uint16, bytes32) view returns (uint256 cap, uint256 minted)",
+          "function getAreas() view returns (bytes32[])",
+          "function getBudgetYears() view returns (uint16[])",
+          "function getBudgetsForYear(uint16 ano) view returns (bytes32[] areas, uint256[] caps, uint256[] mintedValues, uint256[] realizedValues)",
+          "function setBudget(uint16 ano, bytes32 area, uint256 cap)",
+        ];
 
       const frontendContract = new ethers.Contract(contractAddress, minimalAbi, owner);
 
@@ -106,52 +108,21 @@ describe("Frontend Contract Validation", function() {
     });
 
     it("Should simulate area discovery like frontend", async function() {
-      // Setup: add some areas to generate events
+      // Setup: add some areas to generate state changes
       const saude = ethers.encodeBytes32String("SAUDE");
       const educacao = ethers.encodeBytes32String("EDUCACAO");
-      
+
       await dinheiroCarimbado.addArea(saude);
       await dinheiroCarimbado.addArea(educacao);
       await dinheiroCarimbado.removeArea(educacao); // Remove to test filtering
 
-      // Simulate frontend's discoverAreas function
-      async function discoverAreas(contract, provider) {
-        const topicAdded = contract.interface.getEvent("AreaAdded").topicHash;
-        const topicRemoved = contract.interface.getEvent("AreaRemoved").topicHash;
-        
-        const filter = {
-          address: await contract.getAddress(),
-          fromBlock: 0,
-          toBlock: "latest",
-          topics: [[topicAdded, topicRemoved]]
-        };
-        
-        const logs = await provider.getLogs(filter);
-        const areas = new Map();
-        
-        for (const log of logs) {
-          try {
-            const parsed = contract.interface.parseLog({
-              topics: log.topics,
-              data: log.data
-            });
-            const area = parsed.args.area;
-            if (parsed.name === "AreaAdded") {
-              areas.set(area, true);
-            } else if (parsed.name === "AreaRemoved") {
-              areas.set(area, false);
-            }
-          } catch (error) {
-            // Ignore parsing errors
-          }
-        }
-        
-        return [...areas.entries()]
-          .filter(([, active]) => active)
-          .map(([area]) => area);
+      // Simulate frontend's discoverAreas function using contract call
+      async function discoverAreas(contractInstance) {
+        const areas = await contractInstance.getAreas();
+        return Array.from(areas);
       }
 
-      const discoveredAreas = await discoverAreas(dinheiroCarimbado, ethers.provider);
+      const discoveredAreas = await discoverAreas(dinheiroCarimbado);
       
       // Should find SAUDE but not EDUCACAO (was removed)
       expect(discoveredAreas).to.have.lengthOf(1);
@@ -165,37 +136,20 @@ describe("Frontend Contract Validation", function() {
       await dinheiroCarimbado.connect(legislator).setBudget(2024, saude, 1000000);
       await dinheiroCarimbado.connect(legislator).setBudget(2025, saude, 2000000);
 
-      // Simulate budget discovery like frontend
-      async function discoverBudgetYears(contract, provider) {
-        const topic = contract.interface.getEvent("BudgetSet").topicHash;
-        const logs = await provider.getLogs({
-          address: await contract.getAddress(),
-          fromBlock: 0,
-          toBlock: "latest",
-          topics: [topic]
-        });
-        
-        const years = new Set();
-        for (const log of logs) {
-          const parsed = contract.interface.parseLog({
-            topics: log.topics,
-            data: log.data
-          });
-          years.add(Number(parsed.args.ano));
-        }
-        
-        return [...years].sort();
-      }
-
-      const budgetYears = await discoverBudgetYears(dinheiroCarimbado, ethers.provider);
+      // Simulate budget discovery like frontend using helper views
+      const rawYears = await dinheiroCarimbado.getBudgetYears();
+      const budgetYears = Array.from(rawYears).map((y) => Number(y)).sort();
       expect(budgetYears).to.deep.equal([2024, 2025]);
 
-      // Test budget retrieval
-      const budget2024 = await dinheiroCarimbado.budget(2024, saude);
-      expect(budget2024[0]).to.equal(1000000n);
-      
-      const budget2025 = await dinheiroCarimbado.budget(2025, saude);
-      expect(budget2025[0]).to.equal(2000000n);
+      const budgets2024 = await dinheiroCarimbado.getBudgetsForYear(2024);
+      const idx2024 = budgets2024.areas.findIndex((a) => a === saude);
+      expect(idx2024).to.be.gte(0);
+      expect(budgets2024.caps[idx2024]).to.equal(1000000n);
+
+      const budgets2025 = await dinheiroCarimbado.getBudgetsForYear(2025);
+      const idx2025 = budgets2025.areas.findIndex((a) => a === saude);
+      expect(idx2025).to.be.gte(0);
+      expect(budgets2025.caps[idx2025]).to.equal(2000000n);
     });
   });
 
