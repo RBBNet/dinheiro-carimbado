@@ -18,6 +18,11 @@ contract DinheiroCarimbado {
     mapping(address => bool) public isTreasury;
     mapping(address => bool) public isAgency;
     mapping(address => bool) public isLiquidator;
+    // Registries (append-only) to allow enumeration via view functions
+    address[] private legislatorRegistry; mapping(address => bool) private legislatorSeen;
+    address[] private treasuryRegistry;   mapping(address => bool) private treasurySeen;
+    address[] private agencyRegistry;     mapping(address => bool) private agencySeen;
+    address[] private liquidatorRegistry; mapping(address => bool) private liquidatorSeen;
     
     // Agency names mapping
     mapping(address => string) public agencyNames;
@@ -25,17 +30,30 @@ contract DinheiroCarimbado {
     event RoleSet(string role, address indexed who, bool enabled);
     event AgencyNameSet(address indexed agency, string name);
 
-    function setLegislator(address a, bool e) external onlyOwner { isLegislator[a] = e; emit RoleSet("LEGISLATOR", a, e); }
-    function setTreasury(address a, bool e)   external onlyOwner { isTreasury[a]   = e; emit RoleSet("TREASURY", a, e); }
+    function setLegislator(address a, bool e) external onlyOwner { 
+        isLegislator[a] = e; 
+        if (e && !legislatorSeen[a]) { legislatorSeen[a] = true; legislatorRegistry.push(a); }
+        emit RoleSet("LEGISLATOR", a, e); 
+    }
+    function setTreasury(address a, bool e)   external onlyOwner { 
+        isTreasury[a]   = e; 
+        if (e && !treasurySeen[a]) { treasurySeen[a] = true; treasuryRegistry.push(a); }
+        emit RoleSet("TREASURY", a, e); 
+    }
     function setAgency(address a, bool e, string calldata name) external onlyOwner { 
         isAgency[a] = e; 
         if (e) {
             agencyNames[a] = name;
+            if (!agencySeen[a]) { agencySeen[a] = true; agencyRegistry.push(a); }
             emit AgencyNameSet(a, name);
         }
         emit RoleSet("AGENCY", a, e); 
     }
-    function setLiquidator(address a, bool e) external onlyOwner { isLiquidator[a] = e; emit RoleSet("LIQUIDATOR", a, e); }
+    function setLiquidator(address a, bool e) external onlyOwner { 
+        isLiquidator[a] = e; 
+        if (e && !liquidatorSeen[a]) { liquidatorSeen[a] = true; liquidatorRegistry.push(a); }
+        emit RoleSet("LIQUIDATOR", a, e); 
+    }
 
     // --------- Áreas ---------
     mapping(bytes32 => bool) public isArea;
@@ -91,12 +109,14 @@ contract DinheiroCarimbado {
 
     mapping(address => Company) private companies;
     mapping(address => bool) public isCompany; // ajuda consultas
+    address[] private companyRegistry; mapping(address => bool) private companySeen;
 
     event CompanyUpsert(address indexed empresa, bytes14 cnpj, string name, bool active);
     event CompanyAreaSet(address indexed empresa, bytes32 indexed area, bool allowed);
 
     function upsertCompany(address empresa, bytes14 cnpj, string calldata name, bool active) external onlyOwner {
         isCompany[empresa] = true;
+        if (!companySeen[empresa]) { companySeen[empresa] = true; companyRegistry.push(empresa); }
         companies[empresa].cnpj = cnpj;
         companies[empresa].name = name;
         companies[empresa].active = active;
@@ -117,6 +137,49 @@ contract DinheiroCarimbado {
     function getCompanyName(address empresa) external view returns (string memory) {
         require(isCompany[empresa], "not company");
         return companies[empresa].name;
+    }
+
+    /// View aggregate helpers (enumeration) ---------
+    function getLegislators() external view returns (address[] memory active) {
+        uint256 count; uint256 len = legislatorRegistry.length; for (uint256 i; i < len; i++) if (isLegislator[legislatorRegistry[i]]) count++;
+        active = new address[](count); uint256 idx; for (uint256 i; i < len; i++) { address a = legislatorRegistry[i]; if (isLegislator[a]) { active[idx++] = a; } }
+    }
+    function getTreasuries() external view returns (address[] memory active) {
+        uint256 count; uint256 len = treasuryRegistry.length; for (uint256 i; i < len; i++) if (isTreasury[treasuryRegistry[i]]) count++;
+        active = new address[](count); uint256 idx; for (uint256 i; i < len; i++) { address a = treasuryRegistry[i]; if (isTreasury[a]) { active[idx++] = a; } }
+    }
+    function getAgencies() external view returns (address[] memory active) {
+        uint256 count; uint256 len = agencyRegistry.length; for (uint256 i; i < len; i++) if (isAgency[agencyRegistry[i]]) count++;
+        active = new address[](count); uint256 idx; for (uint256 i; i < len; i++) { address a = agencyRegistry[i]; if (isAgency[a]) { active[idx++] = a; } }
+    }
+    function getLiquidators() external view returns (address[] memory active) {
+        uint256 count; uint256 len = liquidatorRegistry.length; for (uint256 i; i < len; i++) if (isLiquidator[liquidatorRegistry[i]]) count++;
+        active = new address[](count); uint256 idx; for (uint256 i; i < len; i++) { address a = liquidatorRegistry[i]; if (isLiquidator[a]) { active[idx++] = a; } }
+    }
+    function getCompanies() external view returns (address[] memory active) {
+        uint256 count; uint256 len = companyRegistry.length; for (uint256 i; i < len; i++) if (isCompany[companyRegistry[i]]) count++;
+        active = new address[](count); uint256 idx; for (uint256 i; i < len; i++) { address a = companyRegistry[i]; if (isCompany[a]) { active[idx++] = a; } }
+    }
+    function getCompany(address empresa) external view returns (bytes14 cnpj, string memory name, bool active, bytes32[] memory areas) {
+        require(isCompany[empresa], "not company");
+        Company storage c = companies[empresa];
+        cnpj = c.cnpj; name = c.name; active = c.active;
+        // count allowed areas
+        uint256 count; uint256 len = areaRegistry.length; for (uint256 i; i < len; i++) if (c.allowedArea[areaRegistry[i]]) count++;
+        areas = new bytes32[](count); uint256 idx; for (uint256 i; i < len; i++) { bytes32 ar = areaRegistry[i]; if (c.allowedArea[ar]) { areas[idx++] = ar; } }
+    }
+    function getCompanyAreas(address empresa) external view returns (bytes32[] memory areas) {
+        require(isCompany[empresa], "not company");
+        Company storage c = companies[empresa];
+        uint256 count; uint256 len = areaRegistry.length; for (uint256 i; i < len; i++) if (c.allowedArea[areaRegistry[i]]) count++;
+        areas = new bytes32[](count); uint256 idx; for (uint256 i; i < len; i++) { bytes32 ar = areaRegistry[i]; if (c.allowedArea[ar]) { areas[idx++] = ar; } }
+    }
+    /// Return balances of all active agencies for one (area, year)
+    function getAgencyBalances(bytes32 area, uint16 ano) external view returns (address[] memory agencies, uint256[] memory balances) {
+        uint256 len = agencyRegistry.length; uint256 count;
+        for (uint256 i; i < len; i++) if (isAgency[agencyRegistry[i]]) count++;
+        agencies = new address[](count); balances = new uint256[](count); uint256 idx;
+        for (uint256 i; i < len; i++) { address a = agencyRegistry[i]; if (isAgency[a]) { agencies[idx] = a; balances[idx] = balanceOfAreaYear[a][area][ano]; idx++; } }
     }
 
     // --------- Helper functions for year-based balances ---------

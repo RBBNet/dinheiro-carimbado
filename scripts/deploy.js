@@ -3,176 +3,148 @@ const { ethers } = require("hardhat");
 const hre = require("hardhat");
 require("dotenv").config();
 
-function toAddr(x) {
-  return typeof x === "string" ? x : x?.address;
-}
-function must(str, name) {
-  if (!str) throw new Error(`.env missing ${name}`);
-  return str;
-}
-function isAddr(str) {
-  try { return !!str && ethers.isAddress(str); } catch { return false; }
-}
-function toBytes14Strict(s14) {
-  const bytes = ethers.toUtf8Bytes(s14);
-  if (bytes.length !== 14) throw new Error("CNPJ must have exactly 14 chars");
-  return ethers.hexlify(bytes);
-}
-
 async function main() {
   const networkName = hre.network.name;
   console.log("Network:", networkName);
 
-  // Common variables that can be string (address) or Signer
+  // Sempre pegamos pelo menos um signer (deployer) – nas duas redes agora a lista de accounts vem da config
+  const signers = await ethers.getSigners();
+  if (!signers.length) throw new Error("Nenhum signer disponível. Verifique DEPLOY_PRIVATE_KEY ou accounts no hardhat.config.js");
+  const deployer = signers[0];
+
+  // Helper para normalizar endereço (string ou signer)
+  const addrOf = (v) => (typeof v === 'string' ? v : (v && v.address));
+  const isAddr = (a) => { try { return !!a && ethers.isAddress(a); } catch { return false; } };
+
+  // Tentar usar variáveis de ambiente se existirem; caso contrário, mapear signers
+  const env = {
+    owner: process.env.OWNER,
+    legislator: process.env.LEGISLATOR,
+    treasury: process.env.TREASURY,
+    liquidator: process.env.LIQUIDATOR,
+    agenciaSaude: process.env.AGENCIA_SAUDE,
+    agenciaEducacao: process.env.AGENCIA_EDUCACAO,
+    prefeitura1: process.env.PREFEITURA1,
+    prefeitura2: process.env.PREFEITURA2,
+    empresaSaude1: process.env.EMPRESA_SAUDE1,
+    empresaSaude2: process.env.EMPRESA_SAUDE2,
+    empresaEducacao1: process.env.EMPRESA_EDUCACAO1,
+    empresaEducacao2: process.env.EMPRESA_EDUCACAO2,
+  };
+
+  const allEnvPresent = Object.values(env).every(isAddr);
+
   let owner, legislator, treasury, liquidator,
       agenciaSaude, agenciaEducacao, prefeitura1, prefeitura2,
       empresaSaude1, empresaSaude2, empresaEducacao1, empresaEducacao2;
 
-  // Signer to send txs
-  let deployer;
-
-  if (networkName === "rbb_lab") {
-    // Use addresses from .env (strings)
-    const OWNER = must(process.env.OWNER, "OWNER");
-    owner = OWNER;
-    legislator = process.env.LEGISLATOR;
-    treasury = process.env.TREASURY;
-    liquidator = process.env.LIQUIDATOR;
-    agenciaSaude = process.env.AGENCIA_SAUDE;
-    agenciaEducacao = process.env.AGENCIA_EDUCACAO;
-    prefeitura1 = process.env.PREFEITURA1;
-    prefeitura2 = process.env.PREFEITURA2;
-    empresaSaude1 = process.env.EMPRESA_SAUDE1;
-    empresaSaude2 = process.env.EMPRESA_SAUDE2;
-    empresaEducacao1 = process.env.EMPRESA_EDUCACAO1;
-    empresaEducacao2 = process.env.EMPRESA_EDUCACAO2;
-
-    const pk = must(process.env.DEPLOY_PRIVATE_KEY, "DEPLOY_PRIVATE_KEY");
-    deployer = new ethers.Wallet(pk, ethers.provider);
-
-    // Avisos sobre variáveis ausentes
-    const maybe = (name, v) => { if (!isAddr(v)) console.warn(`(warn) .env ${name} ausente ou inválido`); };
-    maybe("LEGISLATOR", legislator);
-    maybe("TREASURY", treasury);
-    maybe("LIQUIDATOR", liquidator);
-    maybe("AGENCIA_SAUDE", agenciaSaude);
-    maybe("AGENCIA_EDUCACAO", agenciaEducacao);
-    maybe("PREFEITURA1", prefeitura1);
-    maybe("PREFEITURA2", prefeitura2);
-    maybe("EMPRESA_SAUDE1", empresaSaude1);
-    maybe("EMPRESA_SAUDE2", empresaSaude2);
-    maybe("EMPRESA_EDUCACAO1", empresaEducacao1);
-    maybe("EMPRESA_EDUCACAO2", empresaEducacao2);
+  if (allEnvPresent) {
+    ({ owner, legislator, treasury, liquidator, agenciaSaude, agenciaEducacao, prefeitura1, prefeitura2, empresaSaude1, empresaSaude2, empresaEducacao1, empresaEducacao2 } = env);
+    console.log("Usando endereços do .env");
   } else {
-    // Local networks: use Hardhat signers
-    [
-      owner,
-      legislator,
-      treasury,
-      liquidator,
-      agenciaSaude,
-      agenciaEducacao,
-      prefeitura1,
-      prefeitura2,
-      empresaSaude1,
-      empresaSaude2,
-      empresaEducacao1,
-      empresaEducacao2,
-    ] = await ethers.getSigners();
-    deployer = owner; // owner is a Signer here
+    // Fallback: usar signers na ordem disponível
+    [ owner, legislator, treasury, liquidator, agenciaSaude, agenciaEducacao, prefeitura1, prefeitura2, empresaSaude1, empresaSaude2, empresaEducacao1, empresaEducacao2 ] = signers;
+    console.log("Usando signers locais (nem todos os endereços do .env presentes)");
   }
 
-  const a = (x) => toAddr(x) || "(nd)";
+  // Garantir que o owner para o construtor é o deployer, caso contrário as chamadas owner-only falharão
+  if (!isAddr(owner)) owner = deployer.address;
+  if (addrOf(owner).toLowerCase() !== deployer.address.toLowerCase()) {
+    console.warn("[aviso] OWNER do .env difere do deployer; as chamadas owner-only podem falhar se a chave não estiver carregada.");
+  }
+
+  const printMap = [
+    ['owner', owner],
+    ['legislator', legislator],
+    ['treasury', treasury],
+    ['liquidator', liquidator],
+    ['Ministério da Saúde (agency)', agenciaSaude],
+    ['Ministério da Educação (agency)', agenciaEducacao],
+    ['Prefeitura1 (agency)', prefeitura1],
+    ['Prefeitura2 (agency)', prefeitura2],
+    ['EmpresaSaúde1', empresaSaude1],
+    ['EmpresaSaúde2', empresaSaude2],
+    ['EmpresaEducação1', empresaEducacao1],
+    ['EmpresaEducação2', empresaEducacao2],
+  ];
 
   console.log("\n=== Accounts Map ===");
-  console.log("owner:", a(owner));
-  console.log("legislator:", a(legislator));
-  console.log("treasury:", a(treasury));
-  console.log("liquidator:", a(liquidator));
-  console.log("Ministério da Saúde (agency):", a(agenciaSaude));
-  console.log("Ministério da Educação (agency):", a(agenciaEducacao));
-  console.log("Prefeitura1 (agency):", a(prefeitura1));
-  console.log("Prefeitura2 (agency):", a(prefeitura2));
-  console.log("EmpresaSaúde1:", a(empresaSaude1));
-  console.log("EmpresaSaúde2:", a(empresaSaude2));
-  console.log("EmpresaEducação1:", a(empresaEducacao1));
-  console.log("EmpresaEducação2:", a(empresaEducacao2));
-  console.log("deployer (tx sender):", deployer.address);
+  for (const [label, v] of printMap) {
+    console.log(label + ':', addrOf(v));
+  }
+  console.log('Deployer (tx signer):', deployer.address);
 
-  // Deploy with deployer; constructor expects owner address (string)
+  // Deploy sempre com deployer
   const Factory = await ethers.getContractFactory("DinheiroCarimbado", deployer);
-  const c = await Factory.deploy(toAddr(owner));
+  const c = await Factory.deploy(addrOf(owner));
   await c.waitForDeployment();
   const addr = await c.getAddress();
 
   const contractOwner = await c.owner();
-  if (!contractOwner) {
-    console.error("Falha ao acessar o contrato. Implantação pode ter falhado.");
-    process.exit(1);
-  } else {
-    console.log("\nConfirmando o owner: ", contractOwner);
-  }
-
+  console.log("\nConfirmando o owner: ", contractOwner);
   console.log("\nDinheiroCarimbado deployed to:", addr);
   console.log("Token (ERC20) address:", await c.token());
 
-  // Helpers
   const SAUDE = ethers.encodeBytes32String("SAUDE");
   const EDUCACAO = ethers.encodeBytes32String("EDUCACAO");
+  const toBytes14 = (s14) => {
+    const bytes = ethers.toUtf8Bytes(s14);
+    if (bytes.length !== 14) throw new Error("CNPJ must be 14 chars");
+    return ethers.hexlify(bytes);
+  };
 
-  // Owner-only calls: executed by deployer
-  if (isAddr(toAddr(legislator))) await (await c.connect(deployer).setLegislator(toAddr(legislator), true)).wait();
-  if (isAddr(toAddr(treasury))) await (await c.connect(deployer).setTreasury(toAddr(treasury), true)).wait();
-  if (isAddr(toAddr(liquidator))) await (await c.connect(deployer).setLiquidator(toAddr(liquidator), true)).wait();
+  const ownerSigner = contractOwner.toLowerCase() === deployer.address.toLowerCase() ? deployer : deployer; // fallback igual
 
-  // Agencies (only if address provided)
-  if (isAddr(toAddr(agenciaSaude)))     await (await c.connect(deployer).setAgency(toAddr(agenciaSaude), true, "Ministério da Saúde")).wait();
-  if (isAddr(toAddr(agenciaEducacao)))  await (await c.connect(deployer).setAgency(toAddr(agenciaEducacao), true, "Ministério da Educação")).wait();
-  if (isAddr(toAddr(prefeitura1)))      await (await c.connect(deployer).setAgency(toAddr(prefeitura1), true, "Prefeitura 1")).wait();
-  if (isAddr(toAddr(prefeitura2)))      await (await c.connect(deployer).setAgency(toAddr(prefeitura2), true, "Prefeitura 2")).wait();
-
-  console.log("Roles set (onde havia endereço válido).");
-
-  // Areas
-  await (await c.connect(deployer).addArea(SAUDE)).wait();
-  await (await c.connect(deployer).addArea(EDUCACAO)).wait();
-  console.log("Areas added: SAUDE, EDUCACAO.");
-
-  // Companies (only if address provided)
-  if (isAddr(toAddr(empresaSaude1))) {
-    await (await c.connect(deployer).upsertCompany(toAddr(empresaSaude1), toBytes14Strict("11111111111111"), "Empresa Saúde 1", true)).wait();
-    await (await c.connect(deployer).setCompanyArea(toAddr(empresaSaude1), SAUDE, true)).wait();
-  }
-  if (isAddr(toAddr(empresaSaude2))) {
-    await (await c.connect(deployer).upsertCompany(toAddr(empresaSaude2), toBytes14Strict("22222222222222"), "Empresa Saúde 2", true)).wait();
-    await (await c.connect(deployer).setCompanyArea(toAddr(empresaSaude2), SAUDE, true)).wait();
-  }
-  if (isAddr(toAddr(empresaEducacao1))) {
-    await (await c.connect(deployer).upsertCompany(toAddr(empresaEducacao1), toBytes14Strict("33333333333333"), "Empresa Educação 1", true)).wait();
-    await (await c.connect(deployer).setCompanyArea(toAddr(empresaEducacao1), EDUCACAO, true)).wait();
-  }
-  if (isAddr(toAddr(empresaEducacao2))) {
-    await (await c.connect(deployer).upsertCompany(toAddr(empresaEducacao2), toBytes14Strict("44444444444444"), "Empresa Educação 2", true)).wait();
-    await (await c.connect(deployer).setCompanyArea(toAddr(empresaEducacao2), EDUCACAO, true)).wait();
+  async function safe(fn, label) {
+    try { 
+      console.log(`Executando ${label}...`);
+      const tx = await fn(); 
+      if (tx && tx.wait) {
+        await tx.wait();
+        console.log(`✓ ${label} concluído`);
+      }
+    } catch (e) { 
+      console.warn(`✗ Falhou ${label}: ${e.message}`); 
+    }
   }
 
-  console.log("Companies added where addresses were provided.");
+  await safe(() => c.connect(ownerSigner).setLegislator(addrOf(legislator), true), 'setLegislator');
+  await safe(() => c.connect(ownerSigner).setTreasury(addrOf(treasury), true), 'setTreasury');
+  await safe(() => c.connect(ownerSigner).setAgency(addrOf(agenciaSaude), true, "Ministério da Saúde"), 'setAgency saúde');
+  await safe(() => c.connect(ownerSigner).setAgency(addrOf(agenciaEducacao), true, "Ministério da Educação"), 'setAgency educação');
+  await safe(() => c.connect(ownerSigner).setAgency(addrOf(prefeitura1), true, "Prefeitura 1"), 'setAgency pref1');
+  await safe(() => c.connect(ownerSigner).setAgency(addrOf(prefeitura2), true, "Prefeitura 2"), 'setAgency pref2');
+  await safe(() => c.connect(ownerSigner).setLiquidator(addrOf(liquidator), true), 'setLiquidator');
 
-  // Summary
+  await safe(() => c.connect(ownerSigner).addArea(SAUDE), 'addArea SAUDE');
+  await safe(() => c.connect(ownerSigner).addArea(EDUCACAO), 'addArea EDUCACAO');
+
+  await safe(() => c.connect(ownerSigner).upsertCompany(addrOf(empresaSaude1), toBytes14("11111111111111"), "Empresa Saúde 1", true), 'upsert empSaude1');
+  await safe(() => c.connect(ownerSigner).setCompanyArea(addrOf(empresaSaude1), SAUDE, true), 'setCompanyArea empSaude1 SAUDE');
+
+  await safe(() => c.connect(ownerSigner).upsertCompany(addrOf(empresaSaude2), toBytes14("22222222222222"), "Empresa Saúde 2", true), 'upsert empSaude2');
+  await safe(() => c.connect(ownerSigner).setCompanyArea(addrOf(empresaSaude2), SAUDE, true), 'setCompanyArea empSaude2 SAUDE');
+
+  await safe(() => c.connect(ownerSigner).upsertCompany(addrOf(empresaEducacao1), toBytes14("33333333333333"), "Empresa Educação 1", true), 'upsert empEdu1');
+  await safe(() => c.connect(ownerSigner).setCompanyArea(addrOf(empresaEducacao1), EDUCACAO, true), 'setCompanyArea empEdu1 EDUCACAO');
+
+  await safe(() => c.connect(ownerSigner).upsertCompany(addrOf(empresaEducacao2), toBytes14("44444444444444"), "Empresa Educação 2", true), 'upsert empEdu2');
+  await safe(() => c.connect(ownerSigner).setCompanyArea(addrOf(empresaEducacao2), EDUCACAO, true), 'setCompanyArea empEdu2 EDUCACAO');
+
   console.log("\n=== Seed Summary ===");
   console.log("Contract:", addr);
   console.log("Areas:", "SAUDE", "EDUCACAO");
   console.log("Agencies:", {
-    "Ministério da Saúde": a(agenciaSaude),
-    "Ministério da Educação": a(agenciaEducacao),
-    "Prefeitura 1": a(prefeitura1),
-    "Prefeitura 2": a(prefeitura2),
+    "Ministério da Saúde": addrOf(agenciaSaude),
+    "Ministério da Educação": addrOf(agenciaEducacao),
+    "Prefeitura 1": addrOf(prefeitura1),
+    "Prefeitura 2": addrOf(prefeitura2),
   });
   console.log("Companies:", {
-    "Empresa Saúde 1": a(empresaSaude1),
-    "Empresa Saúde 2": a(empresaSaude2),
-    "Empresa Educação 1": a(empresaEducacao1),
-    "Empresa Educação 2": a(empresaEducacao2),
+    "Empresa Saúde 1": addrOf(empresaSaude1),
+    "Empresa Saúde 2": addrOf(empresaSaude2),
+    "Empresa Educação 1": addrOf(empresaEducacao1),
+    "Empresa Educação 2": addrOf(empresaEducacao2),
   });
 }
 

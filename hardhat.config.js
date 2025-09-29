@@ -11,6 +11,11 @@ function pk(key) {
 
 const deployPk = pk(process.env.DEPLOY_PRIVATE_KEY);
 
+// Para a rede 'hardhat' o formato precisa ser array de objetos { privateKey, balance }
+const hardhatAccounts = deployPk ? [{ privateKey: deployPk, balance: "10000000000000000000000" }] : undefined;
+// Para redes externas pode ser array de strings (PKs)
+const externalAccounts = deployPk ? [deployPk] : undefined;
+
 module.exports = {
   solidity: {
     version: "0.8.24",
@@ -18,17 +23,34 @@ module.exports = {
   },
   paths: {
     sources: "./contracts",
-    tests: "./test",
+    tests: "./test", 
     cache: "./cache",
     artifacts: "./artifacts",
   },
   networks: {
-    hardhat: {},
-    rbb_lab: {
+    hardhat: {
+      accounts: hardhatAccounts,
+      from: process.env.DEPLOY_ACCOUNT_ADDRESS,
+  gasPrice: 0,
+  initialBaseFeePerGas: 0, // baseFee zero = truly gasless
+  blockGasLimit: 30000000
+    },
+    localhost: {
+      url: "http://127.0.0.1:8545",
+      chainId: 31337,
+      accounts: externalAccounts,
+      from: process.env.DEPLOY_ACCOUNT_ADDRESS,
+      gasPrice: 0,
+      initialBaseFeePerGas: 0,
+      blockGasLimit: 30000000
+    },
+    rbblab: {
       url: "http://localhost:8545",
       chainId: 648629,
-      accounts: deployPk ? [deployPk] : [],
-      from: process.env.DEPLOY_ACCOUNT_ADDRESS
+      accounts: externalAccounts,
+      from: process.env.DEPLOY_ACCOUNT_ADDRESS,
+      gasPrice: 0,
+      blockGasLimit: 30000000
     }
   }
 };

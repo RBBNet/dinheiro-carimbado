@@ -122,7 +122,7 @@ async function verifyContractDeployment(contractAddress = null) {
         "function isLegislator(address) view returns (bool)",
         "function isArea(bytes32) view returns (bool)",
         "function budget(uint16, bytes32) view returns (uint256 cap, uint256 minted)",
-        "function totalSupplyArea(bytes32) view returns (uint256)"
+        "function totalSupplyAreaYear(bytes32, uint16) view returns (uint256)"
       ];
       
       const frontendContract = new ethers.Contract(actualContractAddress, frontendAbi, deployer);
@@ -131,7 +131,7 @@ async function verifyContractDeployment(contractAddress = null) {
       await frontendContract.isLegislator(deployer.address);
       await frontendContract.isArea(ethers.encodeBytes32String("SAUDE"));
       await frontendContract.budget(2024, ethers.encodeBytes32String("SAUDE"));
-      await frontendContract.totalSupplyArea(ethers.encodeBytes32String("SAUDE"));
+      await frontendContract.totalSupplyAreaYear(ethers.encodeBytes32String("SAUDE"), 2024);
       
       console.log(`   - ABI do frontend: ✅ Compatível`);
     } catch (error) {
@@ -263,6 +263,137 @@ async function verifyContractDeployment(contractAddress = null) {
     })();
     // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+    // ==============================================================
+    // 📦 Dump de estado usando apenas chamadas view (sem eventos)
+    // ==============================================================
+    console.log("\n📦 Dump de estado (views)...");
+
+    function b32ToLabel(b32) {
+      try { return ethers.decodeBytes32String(b32); } catch { return b32; }
+    }
+
+    const stateDump = {};
+
+    async function fetchArray(fnName) {
+      if (!dinheiroCarimbado[fnName]) return [];
+      try { return await dinheiroCarimbado[fnName](); } catch { return []; }
+    }
+
+    const legislators = await fetchArray('getLegislators');
+    const treasuries  = await fetchArray('getTreasuries');
+    const agencies    = await fetchArray('getAgencies');
+    const liquidators = await fetchArray('getLiquidators');
+    console.log(`   Legisladores (${legislators.length}):`, legislators.length ? legislators.join(', ') : '(nenhum)');
+    console.log(`   Tesouraria (${treasuries.length}):`, treasuries.length ? treasuries.join(', ') : '(nenhuma)');
+    console.log(`   Agências (${agencies.length}):`, agencies.length ? agencies.join(', ') : '(nenhuma)');
+    console.log(`   Liquidators (${liquidators.length}):`, liquidators.length ? liquidators.join(', ') : '(nenhum)');
+
+    stateDump.legislators = legislators;
+    stateDump.treasuries = treasuries;
+    stateDump.agencies = agencies;
+    stateDump.liquidators = liquidators;
+
+    const companies = await fetchArray('getCompanies');
+    console.log(`\n🏢 Empresas (${companies.length}):`);
+    const companiesDetail = [];
+    for (const addr of companies) {
+      try {
+        if (dinheiroCarimbado.getCompany) {
+          const c = await dinheiroCarimbado.getCompany(addr);
+          const cnpj = c[0];
+          const name = c[1];
+          const active = c[2];
+          const areas = c[3].map(b32ToLabel);
+          companiesDetail.push({ address: addr, cnpj, name, active, areas });
+          console.log(`   • ${addr} ativo=${active} nome="${name}" CNPJ=${cnpj} áreas=[${areas.join(', ')}]`);
+        } else {
+          const name = await dinheiroCarimbado.getCompanyName(addr).catch(()=>'(nome indisponível)');
+          companiesDetail.push({ address: addr, name });
+          console.log(`   • ${addr} nome="${name}"`);
+        }
+      } catch (e) {
+        console.log(`   • ${addr} (falha ao obter detalhes: ${e.message})`);
+      }
+    }
+    stateDump.companies = companiesDetail;
+
+    let areasActive = [];
+    try { areasActive = await dinheiroCarimbado.getAreas(); } catch {}
+    const areaLabels = areasActive.map(b32ToLabel);
+    console.log(`\n🗂️  Áreas ativas (${areaLabels.length}):`, areaLabels.length ? areaLabels.join(', ') : '(nenhuma)');
+    stateDump.areas = areaLabels;
+
+    let budgets = [];
+    if (dinheiroCarimbado.getAllBudgets) {
+      try {
+        const all = await dinheiroCarimbado.getAllBudgets();
+        budgets = all.map(entry => ({
+          year: Number(entry.ano || entry[0]),
+            area: b32ToLabel(entry.area || entry[1]),
+            cap: (entry.cap || entry[2]).toString(),
+            minted: (entry.minted || entry[3]).toString(),
+            realized: (entry.realized || entry[4]).toString()
+        }));
+      } catch {}
+    } else if (dinheiroCarimbado.getBudgetYears && dinheiroCarimbado.getBudgetsForYear) {
+      try {
+        const years = await dinheiroCarimbado.getBudgetYears();
+        for (const y of years) {
+          try {
+            const r = await dinheiroCarimbado.getBudgetsForYear(y);
+            const areas = r.areas || r[0];
+            const caps = r.caps || r[1];
+            const mintedVals = r.mintedValues || r[2];
+            const realizedVals = r.realizedValues || r[3];
+            for (let i = 0; i < areas.length; i++) {
+              budgets.push({
+                year: Number(y),
+                area: b32ToLabel(areas[i]),
+                cap: caps[i].toString(),
+                minted: mintedVals[i].toString(),
+                realized: realizedVals[i].toString()
+              });
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+    console.log(`\n💰 Orçamentos (${budgets.length} registros):`);
+    for (const b of budgets) {
+      console.log(`   • ano=${b.year} área=${b.area} cap=${b.cap} minted=${b.minted} realized=${b.realized}`);
+    }
+    stateDump.budgets = budgets;
+
+    const agencyBalances = [];
+    if (agencies.length && areaLabels.length && budgets.length) {
+      const years = [...new Set(budgets.map(b => b.year))];
+      for (const year of years) {
+        for (const area of areaLabels) {
+          let entries = [];
+          if (dinheiroCarimbado.getAgencyBalances) {
+            try {
+              const res = await dinheiroCarimbado.getAgencyBalances(ethers.encodeBytes32String(area), year);
+              const addrs = res[0]; const bals = res[1];
+              for (let i = 0; i < addrs.length; i++) entries.push({ agency: addrs[i], year, area, balance: bals[i].toString() });
+            } catch {}
+          }
+          if (!entries.length) {
+            for (const ag of agencies) {
+              try {
+                const bal = await dinheiroCarimbado.balanceOfAreaYear(ag, ethers.encodeBytes32String(area), year);
+                if (bal > 0n) entries.push({ agency: ag, year, area, balance: bal.toString() });
+              } catch {}
+            }
+          }
+          for (const e of entries) agencyBalances.push(e);
+        }
+      }
+    }
+    console.log(`\n🏦 Saldos de agências (registros > 0):`);
+    if (!agencyBalances.length) console.log('   (nenhum saldo positivo encontrado)');
+    else agencyBalances.forEach(r => console.log(`   • ano=${r.year} área=${r.area} agência=${r.agency} saldo=${r.balance}`));
+    stateDump.agencyBalances = agencyBalances;
+
     console.log("\n📈 Estatísticas:");
     
     // 10. Estatísticas de gas - simplified version
@@ -282,7 +413,9 @@ async function verifyContractDeployment(contractAddress = null) {
       contractAddress: actualContractAddress,
       tokenAddress,
       network: network.name,
-      chainId: network.chainId
+      chainId: network.chainId,
+      // incluir dump agregado
+      stateDump
     };
 
   } catch (error) {
