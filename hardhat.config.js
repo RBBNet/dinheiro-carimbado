@@ -10,11 +10,13 @@ function pk(key) {
 }
 
 const deployPk = pk(process.env.DEPLOY_PRIVATE_KEY);
+const agenciaSaudePk = pk(process.env.AGENCIA_SAUDE_PRIVATE_KEY);
+const agenciaEducacaoPk = pk(process.env.AGENCIA_EDUCACAO_PRIVATE_KEY);
 
 // Para a rede 'hardhat' o formato precisa ser array de objetos { privateKey, balance }
 const hardhatAccounts = deployPk ? [{ privateKey: deployPk, balance: "10000000000000000000000" }] : undefined;
 // Para redes externas pode ser array de strings (PKs)
-const externalAccounts = deployPk ? [deployPk] : undefined;
+const externalAccounts = deployPk ? [deployPk, agenciaSaudePk, agenciaEducacaoPk] : undefined;
 
 module.exports = {
   solidity: {
@@ -30,10 +32,7 @@ module.exports = {
   networks: {
     hardhat: {
       accounts: hardhatAccounts,
-      from: process.env.DEPLOY_ACCOUNT_ADDRESS,
-  gasPrice: 0,
-  initialBaseFeePerGas: 0, // baseFee zero = truly gasless
-  blockGasLimit: 30000000
+      from: process.env.DEPLOY_ACCOUNT_ADDRESS
     },
     localhost: {
       url: "http://127.0.0.1:8545",

@@ -18,27 +18,148 @@
     "event CompanyAreaSet(address indexed empresa, bytes32 indexed area, bool allowed)",
     "event BudgetSet(uint16 indexed ano, bytes32 indexed area, uint256 cap)",
     "event MintToAgency(address indexed to, bytes32 indexed area, uint16 indexed ano, uint256 amount)",
-    "event PaidCompany(address indexed agency, address indexed company, uint16 indexed ano, bytes32 area, uint256 amount)",
+  "event PaidCompany(address indexed agency, address indexed company, uint16 indexed ano, bytes32 area, uint256 amount, string agencyName, string companyName)",
     "event TransferAreaYear(address indexed from, address indexed to, uint16 indexed ano, bytes32 area, uint256 amount)",
     "event Settled(address indexed company, bytes32 indexed area, uint16 indexed ano, uint256 amount, bytes32 offchainRef)",
   ];
 
   let provider, contract;
-  let isConnected = false;
-  let eventFilters = {};
+  const seenLogs = new Set(); // txHash#logIndex
+  const blockTimeCache = new Map(); // blockNumber -> Date
 
-  // DOM elements
-  const connectBtn = $("#connectBtn");
-  const clearBtn = $("#clearBtn");
-  const connectionStatus = $("#connectionStatus");
-  const statusText = $("#statusText");
-  const networkName = $("#networkName");
-  const contractAddress = $("#contractAddress");
-  const lastBlock = $("#lastBlock");
-  const eventsLog = $("#eventsLog");
-  const addrInput = $("#addrInput");
-  const saveAddrBtn = $("#saveAddr");
-  const clearAddrBtn = $("#clearAddr");
+  function formatTs(blockNumber) {
+    return blockTimeCache.get(blockNumber)?.toLocaleString('pt-BR') || '';
+  }
+
+  async function ensureBlockTime(blockNumber) {
+    if (!blockTimeCache.has(blockNumber)) {
+      const blk = await provider.getBlock(blockNumber);
+      blockTimeCache.set(blockNumber, new Date(Number(blk.timestamp) * 1000));
+    }
+  }
+
+  function renderEvent(name, data, log) {
+    // log: { transactionHash, logIndex, blockNumber }
+    const id = `${log.transactionHash}#${log.logIndex}`;
+    if (seenLogs.has(id)) return;
+    seenLogs.add(id);
+
+    const el = document.createElement('div');
+    el.className = 'event-item';
+    el.innerHTML = `
+      <div class="event-header">
+        <span class="badge ${name}">${name}</span>
+        <span class="evt-time" data-block="${log.blockNumber}">...</span>
+      </div>
+      <div class="evt-body">
+        ${Object.entries(data).map(([k,v]) =>
+          `<div class="field"><label>${k}</label><span>${v}</span></div>`).join('')}
+        <div class="field full"><label>Tx Hash</label><span class="tx-hash">${log.transactionHash}</span></div>
+      </div>
+    `;
+    eventsLog.prepend(el);
+    // limit
+    const all = eventsLog.querySelectorAll('.event-item');
+    if (all.length > 100) all[all.length - 1].remove();
+  }
+
+  async function handleRuntimeEvent(evName, args, ev) {
+    try {
+      await ensureBlockTime(ev.blockNumber);
+      const base = { bloco: ev.blockNumber };
+      let payload;
+      switch (evName) {
+        case 'BudgetSet':
+          payload = { ...base, ano: args[0], area: bytes32ToStr(args[1]), cap: args[2] };
+          break;
+        case 'MintToAgency':
+          payload = { ...base, to: shorten(args[0]), area: bytes32ToStr(args[1]), ano: args[2], amount: args[3] };
+          break;
+        case 'PaidCompany':
+          payload = { ...base, agency: shorten(args[0]), company: shorten(args[1]), ano: args[2],
+            area: bytes32ToStr(args[3]), amount: args[4], agencyName: args[5], companyName: args[6] };
+          break;
+        case 'TransferAreaYear':
+          payload = { ...base, from: shorten(args[0]), to: shorten(args[1]), ano: args[2],
+            area: bytes32ToStr(args[3]), amount: args[4] };
+          break;
+        case 'CompanyUpsert':
+          payload = { ...base, empresa: shorten(args[0]), cnpj: args[1], name: args[2], active: args[3] };
+          break;
+        case 'CompanyAreaSet':
+          payload = { ...base, empresa: shorten(args[0]), area: bytes32ToStr(args[1]), allowed: args[2] };
+          break;
+        case 'Settled':
+          payload = { ...base, company: shorten(args[0]), area: bytes32ToStr(args[1]), ano: args[2], amount: args[3], ref: args[4] };
+          break;
+        default:
+          payload = { ...base };
+      }
+      renderEvent(evName, payload, ev);
+      // update timestamp text
+      const timeSpan = eventsLog.querySelector(`.event-item .evt-time[data-block="${ev.blockNumber}"]`);
+      if (timeSpan) timeSpan.textContent = formatTs(ev.blockNumber);
+    } catch (e) {
+      console.error('Erro processando evento runtime', evName, e);
+    }
+  }
+
+  function attachListeners() {
+    if (!contract) return;
+    contract.removeAllListeners();
+    const listen = (name) => {
+      contract.on(name, (...runtimeArgs) => {
+        const ev = runtimeArgs[runtimeArgs.length - 1]; // last arg = Event
+        const pureArgs = runtimeArgs.slice(0, runtimeArgs.length - 1);
+        handleRuntimeEvent(name, pureArgs, ev);
+      });
+    };
+    [
+      'CompanyUpsert','CompanyAreaSet','BudgetSet','MintToAgency',
+      'TransferAreaYear','PaidCompany','Settled'
+    ].forEach(listen);
+    console.log('Listeners instalados.');
+  }
+
+  async function backfillRecent() {
+    if (!contract || !provider) return;
+    try {
+      const latest = await provider.getBlockNumber();
+      const from = latest > 1500 ? latest - 1500 : 0;
+      const events = [
+        'CompanyUpsert','CompanyAreaSet','BudgetSet','MintToAgency',
+        'TransferAreaYear','PaidCompany','Settled'
+      ];
+      for (const evName of events) {
+        const filter = contract.filters[evName];
+        if (!filter) continue;
+        const logs = await contract.queryFilter(filter, from, latest);
+        for (const log of logs) {
+          await ensureBlockTime(log.blockNumber);
+          handleRuntimeEvent(evName, log.args, log);
+        }
+      }
+      // atualizar timestamps atrasados
+      document.querySelectorAll('.evt-time').forEach(span => {
+        const bn = Number(span.dataset.block);
+        span.textContent = formatTs(bn);
+      });
+      console.log('Backfill concluído.');
+    } catch (e) {
+      console.error('Backfill falhou', e);
+    }
+  }
+
+  // Botão “Limpar Log” deve também limpar set (se quer permitir reaparecer no backfill remova a linha seenLogs.clear()):
+  clearBtn?.addEventListener('click', () => {
+    eventsLog.innerHTML = '';
+    seenLogs.clear();
+    console.log('Log limpo.');
+  });
+
+  // Em connect() depois de instanciar contract:
+  // attachListeners();
+  // await backfillRecent();
 
   // Filter checkboxes
   const filterCheckboxes = {
@@ -92,199 +213,35 @@
     }
   }
 
-  function createEventElement(eventName, eventData, transactionHash) {
-    if (!filterCheckboxes[eventName]?.checked) {
-      return null;
-    }
+  // Removed legacy createEventElement/setupEventListeners path (was causing duplicates & missing hashes)
 
-    clearWelcomeMessage();
-
-    const eventDiv = document.createElement('div');
-    eventDiv.className = 'event-item';
-
-    const headerDiv = document.createElement('div');
-    headerDiv.className = 'event-header';
-
-    const typeSpan = document.createElement('span');
-    typeSpan.className = `event-type ${eventName}`;
-    typeSpan.textContent = eventName;
-
-    const timestampSpan = document.createElement('span');
-    timestampSpan.className = 'event-timestamp';
-    timestampSpan.textContent = formatTimestamp();
-
-    headerDiv.appendChild(typeSpan);
-    headerDiv.appendChild(timestampSpan);
-
-    const detailsDiv = document.createElement('div');
-    detailsDiv.className = 'event-details';
-
-    // Add event-specific fields
-    const fields = getEventFields(eventName, eventData);
-    fields.forEach(field => {
-      const fieldDiv = document.createElement('div');
-      fieldDiv.className = 'event-field';
-
-      const labelDiv = document.createElement('div');
-      labelDiv.className = 'event-field-label';
-      labelDiv.textContent = field.label;
-
-      const valueDiv = document.createElement('div');
-      valueDiv.className = 'event-field-value';
-      valueDiv.textContent = field.value;
-
-      fieldDiv.appendChild(labelDiv);
-      fieldDiv.appendChild(valueDiv);
-      detailsDiv.appendChild(fieldDiv);
-    });
-
-    const txDiv = document.createElement('div');
-    txDiv.className = 'event-tx';
-
-    const txLabelDiv = document.createElement('div');
-    txLabelDiv.className = 'event-tx-label';
-    txLabelDiv.textContent = 'Hash da Transação:';
-
-    const txHashDiv = document.createElement('div');
-    txHashDiv.className = 'event-tx-hash';
-    txHashDiv.textContent = transactionHash;
-
-    txDiv.appendChild(txLabelDiv);
-    txDiv.appendChild(txHashDiv);
-
-    eventDiv.appendChild(headerDiv);
-    eventDiv.appendChild(detailsDiv);
-    eventDiv.appendChild(txDiv);
-
-    return eventDiv;
-  }
-
-  function getEventFields(eventName, eventData) {
-    switch (eventName) {
-      case 'CompanyUpsert':
-        return [
-          { label: 'Empresa', value: shorten(eventData.empresa) },
-          { label: 'CNPJ', value: eventData.cnpj },
-          { label: 'Nome', value: eventData.name },
-          { label: 'Ativo', value: eventData.active ? 'Sim' : 'Não' }
-        ];
-
-      case 'CompanyAreaSet':
-        return [
-          { label: 'Empresa', value: shorten(eventData.empresa) },
-          { label: 'Área', value: b32ToLabel(eventData.area) },
-          { label: 'Habilitada', value: eventData.allowed ? 'Sim' : 'Não' }
-        ];
-
-      case 'BudgetSet':
-        return [
-          { label: 'Ano', value: eventData.ano.toString() },
-          { label: 'Área', value: b32ToLabel(eventData.area) },
-          { label: 'Orçamento', value: eventData.cap.toString() }
-        ];
-
-      case 'MintToAgency':
-        return [
-          { label: 'Agência', value: shorten(eventData.to) },
-          { label: 'Área', value: b32ToLabel(eventData.area) },
-          { label: 'Ano', value: eventData.ano.toString() },
-          { label: 'Valor', value: eventData.amount.toString() }
-        ];
-
-      case 'TransferAreaYear':
-        return [
-          { label: 'De', value: eventData.from === '0x0000000000000000000000000000000000000000' ? 'MINT' : shorten(eventData.from) },
-          { label: 'Para', value: eventData.to === '0x0000000000000000000000000000000000000000' ? 'BURN' : shorten(eventData.to) },
-          { label: 'Ano', value: eventData.ano.toString() },
-          { label: 'Área', value: b32ToLabel(eventData.area) },
-          { label: 'Valor', value: eventData.amount.toString() }
-        ];
-
-      case 'PaidCompany':
-        return [
-          { label: 'Agência', value: shorten(eventData.agency) },
-          { label: 'Empresa', value: shorten(eventData.company) },
-          { label: 'Ano', value: eventData.ano.toString() },
-          { label: 'Área', value: b32ToLabel(eventData.area) },
-          { label: 'Valor', value: eventData.amount.toString() }
-        ];
-
-      default:
-        return [];
-    }
-  }
-
-  function addEventToLog(eventElement) {
-    if (eventElement) {
-      eventsLog.insertBefore(eventElement, eventsLog.firstChild);
-      // Keep only the last 100 events
-      const events = eventsLog.querySelectorAll('.event-item');
-      if (events.length > 100) {
-        events[events.length - 1].remove();
-      }
-    }
-  }
-
-  function setupEventListeners() {
-    // Remove existing listeners
-    if (contract && contract.removeAllListeners) {
-      contract.removeAllListeners();
-    }
-
-    // Setup new listeners for each event type
-    const eventTypes = ['CompanyUpsert', 'CompanyAreaSet', 'BudgetSet', 'MintToAgency', 'TransferAreaYear', 'PaidCompany'];
-    
-    eventTypes.forEach(eventName => {
-      contract.on(eventName, (...args) => {
-        const event = args[args.length - 1]; // Last argument is the event object
-        const eventData = {};
-        
-        // Extract event arguments based on event signature
-        switch (eventName) {
-          case 'CompanyUpsert':
-            eventData.empresa = args[0];
-            eventData.cnpj = args[1];
-            eventData.name = args[2];
-            eventData.active = args[3];
-            break;
-          case 'CompanyAreaSet':
-            eventData.empresa = args[0];
-            eventData.area = args[1];
-            eventData.allowed = args[2];
-            break;
-          case 'BudgetSet':
-            eventData.ano = args[0];
-            eventData.area = args[1];
-            eventData.cap = args[2];
-            break;
-          case 'MintToAgency':
-            eventData.to = args[0];
-            eventData.area = args[1];
-            eventData.ano = args[2];
-            eventData.amount = args[3];
-            break;
-          case 'TransferAreaYear':
-            eventData.from = args[0];
-            eventData.to = args[1];
-            eventData.ano = args[2];
-            eventData.area = args[3];
-            eventData.amount = args[4];
-            break;
-          case 'PaidCompany':
-            eventData.agency = args[0];
-            eventData.company = args[1];
-            eventData.ano = args[2];
-            eventData.area = args[3];
-            eventData.amount = args[4];
-            break;
+  async function backfillRecent() {
+    if (!contract || !provider) return;
+    try {
+      const latest = await provider.getBlockNumber();
+      const from = latest > 1500 ? latest - 1500 : 0;
+      const events = [
+        'CompanyUpsert','CompanyAreaSet','BudgetSet','MintToAgency',
+        'TransferAreaYear','PaidCompany','Settled'
+      ];
+      for (const evName of events) {
+        const filter = contract.filters[evName];
+        if (!filter) continue;
+        const logs = await contract.queryFilter(filter, from, latest);
+        for (const log of logs) {
+          await ensureBlockTime(log.blockNumber);
+          handleRuntimeEvent(evName, log.args, log);
         }
-
-        const eventElement = createEventElement(eventName, eventData, event.transactionHash);
-        addEventToLog(eventElement);
+      }
+      // atualizar timestamps atrasados
+      document.querySelectorAll('.evt-time').forEach(span => {
+        const bn = Number(span.dataset.block);
+        span.textContent = formatTs(bn);
       });
-    });
-
-    console.log('Event listeners configured for:', eventTypes.join(', '));
+      console.log('Backfill concluído.');
+    } catch (e) {
+      console.error('Backfill falhou', e);
+    }
   }
 
   async function connect() {
@@ -321,8 +278,10 @@
       const blockNumber = await provider.getBlockNumber();
       lastBlock.textContent = blockNumber.toString();
 
-      // Setup event listeners
-      setupEventListeners();
+  // Setup (single) deduplicated listeners
+  attachListeners();
+  // Optional initial backfill to show recent history without duplicates
+  await backfillRecent();
 
       updateStatus(true);
       console.log('Monitor conectado com sucesso!');
@@ -359,6 +318,7 @@
   // Event listeners
   connectBtn.addEventListener('click', connect);
   clearBtn.addEventListener('click', clearLog);
+  backfillBtn?.addEventListener('click', backfillRecent);
   saveAddrBtn?.addEventListener('click', () => {
     const v = addrInput.value.trim();
     if (!v) { alert('Informe um endereço'); return; }

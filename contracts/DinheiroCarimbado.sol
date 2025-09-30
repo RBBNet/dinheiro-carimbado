@@ -302,7 +302,8 @@ contract DinheiroCarimbado {
 
     event MintToAgency(address indexed to, bytes32 indexed area, uint16 indexed ano, uint256 amount);
     event TransferAreaYear(address indexed from, address indexed to, uint16 indexed ano, bytes32 area, uint256 amount);
-    event PaidCompany(address indexed agency, address indexed company, uint16 indexed ano, bytes32 area, uint256 amount);
+    // Added agencyName & companyName for richer off-chain monitoring (non-indexed)
+    event PaidCompany(address indexed agency, address indexed company, uint16 indexed ano, bytes32 area, uint256 amount, string agencyName, string companyName);
     event Settled(address indexed company, bytes32 indexed area, uint16 indexed ano, uint256 amount, bytes32 offchainRef);
 
     // --------- Emissão e Movimentações ---------
@@ -339,7 +340,7 @@ contract DinheiroCarimbado {
         require(isAgency[msg.sender], "from not agency");
         require(isCompanyAllowedForArea(empresa, area), "company/area not allowed");
         _moveByYear(msg.sender, empresa, area, ano, amount);
-        emit PaidCompany(msg.sender, empresa, ano, area, amount);
+    emit PaidCompany(msg.sender, empresa, ano, area, amount, agencyNames[msg.sender], companies[empresa].name);
         // Mint do token ERC20 para a empresa (1:1 com escala de 18 casas decimais)
         token.mint(empresa, amount * tokenScale);
         // Registrar total de tokens mintados para este ano/área
