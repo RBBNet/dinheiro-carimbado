@@ -6,12 +6,13 @@
     "function isAgency(address) view returns (bool)",
     "function isArea(bytes32) view returns (bool)",
     "function balanceOfAreaYear(address, bytes32, uint16) view returns (uint256)",
-    "function totalSupplyArea(bytes32) view returns (uint256)",
     "function agencyNames(address) view returns (string)",
     "function transferAgencyToAgency(address para, bytes32 area, uint16 ano, uint256 amount)",
-    "event RoleSet(string role, address indexed who, bool enabled)",
-    "event AreaAdded(bytes32 indexed area)",
-    "event AreaRemoved(bytes32 indexed area)",
+    // Novos getters evitando varredura de eventos
+    "function getAreas() view returns (bytes32[])",
+    "function getAgencies() view returns (address[])",
+    "function getBudgetYears() view returns (uint16[])",
+    // Evento necessário apenas para atualização em tempo real
     "event TransferAreaYear(address indexed from, address indexed to, uint16 indexed ano, bytes32 area, uint256 amount)",
   ];
 
@@ -103,55 +104,34 @@
   }
 
   async function discoverAreas() {
-    const topicAdded = ethers.id("AreaAdded(bytes32)");
-    const topicRemoved = ethers.id("AreaRemoved(bytes32)");
-    const filter = { address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [[topicAdded, topicRemoved]] };
-    const logs = await provider.getLogs(filter);
-    const areas = new Map();
-    for (const log of logs) {
-      try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        const area = parsed.args.area;
-        if (parsed.name === "AreaAdded") areas.set(area, true);
-        else if (parsed.name === "AreaRemoved") areas.set(area, false);
-      } catch {}
-    }
-    return [...areas.entries()].filter(([, active]) => active).map(([area]) => area);
+    if (!contract.getAreas) return [];
+    try { return await contract.getAreas(); } catch { return []; }
   }
 
   async function renderBalances(areas) {
-    // Check balances for recent years (2020-2030)
-    const currentYear = new Date().getFullYear();
-    const startYear = Math.max(2020, currentYear - 5);
-    const endYear = currentYear + 5;
-    
-    let html = '<table><thead><tr><th>Ano</th><th>Área</th><th>Saldo Disponível</th></tr></thead><tbody>';
-    let hasBalances = false;
-    
-    for (let ano = startYear; ano <= endYear; ano++) {
+    balancesTable.innerHTML = 'Carregando…';
+    let years = [];
+    if (contract.getBudgetYears) {
+      try { years = await contract.getBudgetYears(); } catch {}
+    }
+    // fallback: limited sliding window if no budget years
+    if (!years.length) {
+      const currentYear = new Date().getFullYear();
+      for (let y = currentYear - 2; y <= currentYear + 2; y++) years.push(y);
+    }
+    let rows = '';
+    for (const ano of years) {
       for (const area of areas) {
         try {
-          const balance = await contract.balanceOfAreaYear(account, area, ano);
-          if (balance > 0n) {  // Only show non-zero balances
-            html += `<tr>
-              <td>${ano}</td>
-              <td>${b32ToLabel(area)}</td>
-              <td>${balance.toString()}</td>
-            </tr>`;
-            hasBalances = true;
+          const bal = await contract.balanceOfAreaYear(account, area, ano);
+          if (bal > 0n) {
+            rows += `<tr><td>${ano}</td><td>${b32ToLabel(area)}</td><td>${bal}</td></tr>`;
           }
-        } catch (e) {
-          console.warn(`Failed to get balance for ${ano}/${b32ToLabel(area)}:`, e);
-        }
+        } catch {}
       }
     }
-    
-    if (!hasBalances) {
-      html += '<tr><td colspan="3" style="text-align: center; color: #666;">Nenhum saldo disponível</td></tr>';
-    }
-    
-    html += '</tbody></table>';
-    balancesTable.innerHTML = html;
+    if (!rows) rows = '<tr><td colspan="3" style="text-align:center;color:#666;">Nenhum saldo disponível</td></tr>';
+    balancesTable.innerHTML = `<table><thead><tr><th>Ano</th><th>Área</th><th>Saldo</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   async function populateAreas(areas) {
@@ -165,56 +145,25 @@
   }
 
   async function populateOtherAgencies() {
-    // Get all agencies from RoleSet events
-    const topicRoleSet = ethers.id("RoleSet(string,address,bool)");
-    const logs = await provider.getLogs({ address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [topicRoleSet] });
-    const agencies = new Set();
-    for (const log of logs) {
-      try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args && parsed.args.role === "AGENCY" && parsed.args.enabled) {
-          agencies.add(parsed.args.who);
-        }
-        if (parsed && parsed.args && parsed.args.role === "AGENCY" && !parsed.args.enabled) {
-          agencies.delete(parsed.args.who);
-        }
-      } catch (e) {
-        console.warn('Failed to parse RoleSet log:', e);
-      }
+    transferToAgency.innerHTML = '';
+    let list = [];
+    if (contract.getAgencies) {
+      try { list = await contract.getAgencies(); } catch {}
     }
-    
-    // Remove current account from the list
-    agencies.delete(account);
-    const otherAgencies = [...agencies];
-    
-    transferToAgency.innerHTML = "";
-    if (!otherAgencies.length) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "Nenhuma outra agência encontrada";
+    list = list.filter(a => a.toLowerCase() !== account.toLowerCase());
+    if (!list.length) {
+      const opt = document.createElement('option');
+      opt.value = ''; opt.textContent = 'Nenhuma outra agência encontrada';
       transferToAgency.appendChild(opt);
       return;
     }
-    
-    // Add placeholder option
-    const placeholderOpt = document.createElement("option");
-    placeholderOpt.value = "";
-    placeholderOpt.textContent = "Selecione uma agência";
-    transferToAgency.appendChild(placeholderOpt);
-    
-    // Fetch names and populate options
-    for (const address of otherAgencies) {
-      const opt = document.createElement("option");
-      opt.value = address;
-      opt.title = address; // show address on hover
-      
-      try {
-        const name = await contract.agencyNames(address);
-        opt.textContent = name || shorten(address);
-      } catch {
-        opt.textContent = shorten(address);
-      }
-      
+    const placeholder = document.createElement('option');
+    placeholder.value=''; placeholder.textContent='Selecione uma agência';
+    transferToAgency.appendChild(placeholder);
+    for (const addr of list) {
+      const opt = document.createElement('option'); opt.value = addr; opt.title = addr;
+      try { const name = await contract.agencyNames(addr); opt.textContent = name || shorten(addr); }
+      catch { opt.textContent = shorten(addr); }
       transferToAgency.appendChild(opt);
     }
   }

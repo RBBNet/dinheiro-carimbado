@@ -10,12 +10,11 @@
     "function balanceOfAreaYear(address, bytes32, uint16) view returns (uint256)",
     "function agencyNames(address) view returns (string)",
     "function getCompanyName(address) view returns (string)",
+    "function getAreas() view returns (bytes32[])",
+    "function getCompanies() view returns (address[])",
+    "function getCompany(address) view returns (bytes14 cnpj, string name, bool active, bytes32[] areas)",
+    "function getBudgetYears() view returns (uint16[])",
     "function payCompany(address empresa, bytes32 area, uint16 ano, uint256 amount)",
-    "event RoleSet(string role, address indexed who, bool enabled)",
-    "event AreaAdded(bytes32 indexed area)",
-    "event AreaRemoved(bytes32 indexed area)",
-    "event CompanyUpsert(address indexed empresa, bytes14 cnpj, string name, bool active)",
-    "event CompanyAreaSet(address indexed empresa, bytes32 indexed area, bool allowed)",
     "event PaidCompany(address indexed agency, address indexed company, uint16 indexed ano, bytes32 area, uint256 amount)",
     "event TransferAreaYear(address indexed from, address indexed to, uint16 indexed ano, bytes32 area, uint256 amount)",
   ];
@@ -111,9 +110,9 @@
           agencyNameSpan.textContent = shorten(account);
         }
 
-        // Load areas, companies, and balances
-        areas = await discoverAreas();
-        await discoverCompanies();
+  // Load via getters (sem varrer logs)
+  areas = await discoverAreas();
+  await discoverCompanies();
         await renderBalances(areas);
         await populateAreas(areas);
         await updateCompanyDropdown();
@@ -129,118 +128,52 @@
   }
 
   async function discoverAreas() {
-    const topicAdded = ethers.id("AreaAdded(bytes32)");
-    const topicRemoved = ethers.id("AreaRemoved(bytes32)");
-    const filter = { address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [[topicAdded, topicRemoved]] };
-    const logs = await provider.getLogs(filter);
-    const areasMap = new Map();
-    for (const log of logs) {
-      try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args) {
-          const area = parsed.args.area;
-          if (parsed.name === "AreaAdded") areasMap.set(area, true);
-          else if (parsed.name === "AreaRemoved") areasMap.set(area, false);
-        }
-      } catch (e) {
-        console.warn('Failed to parse area log:', e);
-      }
-    }
-    return [...areasMap.entries()].filter(([, active]) => active).map(([area]) => area);
+    if (!contract.getAreas) return [];
+    try { return await contract.getAreas(); } catch { return []; }
   }
 
   async function discoverCompanies() {
     companies.clear();
-    
-    // Get CompanyUpsert events to discover companies
-    const topicUpsert = ethers.id("CompanyUpsert(address,bytes14,string,bool)");
-    const upsertLogs = await provider.getLogs({ 
-      address: contract.target, 
-      fromBlock: 0n, 
-      toBlock: "latest", 
-      topics: [topicUpsert] 
-    });
-    
-    for (const log of upsertLogs) {
+    if (!contract.getCompanies) return;
+    let list = [];
+    try { list = await contract.getCompanies(); } catch { list = []; }
+    for (const addr of list) {
       try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args) {
-          if (parsed.args.active) {
-            companies.set(parsed.args.empresa, {
-              cnpj: parsed.args.cnpj,
-              name: parsed.args.name,
-              allowedAreas: new Set()
-            });
-          } else {
-            companies.delete(parsed.args.empresa);
-          }
+        const info = await contract.getCompany(addr);
+        const cnpj = info.cnpj || info[0];
+        const name = info.name || info[1];
+        const active = info.active || info[2];
+        const areasAllowed = info.areas || info[3];
+        if (active) {
+          companies.set(addr, { cnpj, name, allowedAreas: new Set(areasAllowed) });
         }
       } catch (e) {
-        console.warn('Failed to parse company upsert log:', e);
-      }
-    }
-    
-    // Get CompanyAreaSet events to discover allowed areas
-    const topicAreaSet = ethers.id("CompanyAreaSet(address,bytes32,bool)");
-    const areaLogs = await provider.getLogs({ 
-      address: contract.target, 
-      fromBlock: 0n, 
-      toBlock: "latest", 
-      topics: [topicAreaSet] 
-    });
-    
-    for (const log of areaLogs) {
-      try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args) {
-          const company = companies.get(parsed.args.empresa);
-          if (company) {
-            if (parsed.args.allowed) {
-              company.allowedAreas.add(parsed.args.area);
-            } else {
-              company.allowedAreas.delete(parsed.args.area);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to parse company area log:', e);
+        console.warn('Falha ao obter getCompany para', addr, e.message);
       }
     }
   }
 
   async function renderBalances(areas) {
-    // Check balances for recent years (2020-2030)
-    const currentYear = new Date().getFullYear();
-    const startYear = Math.max(2020, currentYear - 5);
-    const endYear = currentYear + 5;
-    
-    let html = '<table><thead><tr><th>Ano</th><th>Área</th><th>Saldo Disponível</th></tr></thead><tbody>';
-    let hasBalances = false;
-    
-    for (let ano = startYear; ano <= endYear; ano++) {
+    balancesTable.innerHTML = 'Carregando…';
+    let years = [];
+    if (contract.getBudgetYears) {
+      try { years = await contract.getBudgetYears(); } catch { years = []; }
+    }
+    if (!years.length) {
+      const currentYear = new Date().getFullYear();
+      for (let y = currentYear - 2; y <= currentYear + 2; y++) years.push(y);
+    }
+    let rows = '';
+    for (const ano of years) {
       for (const area of areas) {
         try {
-          const balance = await contract.balanceOfAreaYear(account, area, ano);
-          if (balance > 0n) {  // Only show non-zero balances
-            html += `<tr>
-              <td>${ano}</td>
-              <td>${b32ToLabel(area)}</td>
-              <td>${balance.toString()}</td>
-            </tr>`;
-            hasBalances = true;
-          }
-        } catch (e) {
-          console.warn(`Failed to get balance for ${ano}/${b32ToLabel(area)}:`, e);
-        }
+          const bal = await contract.balanceOfAreaYear(account, area, ano);
+          if (bal > 0n) rows += `<tr><td>${ano}</td><td>${b32ToLabel(area)}</td><td>${bal}</td></tr>`;
+        } catch {}
       }
     }
-    
-    if (!hasBalances) {
-      html += '<tr><td colspan="3" style="text-align: center; color: #666;">Nenhum saldo disponível</td></tr>';
-    }
-    
-    html += '</tbody></table>';
-    balancesTable.innerHTML = html;
+    if (!rows) rows = '<tr><td colspan="3" style="text-align:center;color:#666;">Nenhum saldo disponível</td></tr>';
+    balancesTable.innerHTML = `<table><thead><tr><th>Ano</th><th>Área</th><th>Saldo</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   async function populateAreas(areas) {
@@ -399,8 +332,7 @@
         await renderBalances(areas);
       }
     });
-    contract.on('TransferArea', async (from, to, area) => {
-      // Refresh balances if this agency is involved in the transfer
+    contract.on('TransferAreaYear', async (from, to, ano, area) => {
       if (from.toLowerCase() === account.toLowerCase() || to.toLowerCase() === account.toLowerCase()) {
         await renderBalances(areas);
       }

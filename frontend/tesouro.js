@@ -11,10 +11,12 @@
     "function mintToAgency(address orgao, bytes32 area, uint16 ano, uint256 amount)",
     "function agencyNames(address) view returns (string)",
     "function getCompanyName(address) view returns (string)",
-    "event RoleSet(string role, address indexed who, bool enabled)",
-    "event AgencyNameSet(address indexed agency, string name)",
-    "event AreaAdded(bytes32 indexed area)",
-    "event AreaRemoved(bytes32 indexed area)",
+    // Novos getters usados para eliminar varredura de eventos
+    "function getAreas() view returns (bytes32[])",
+    "function getAgencies() view returns (address[])",
+    "function getBudgetYears() view returns (uint16[])",
+    "function getBudgetsForYear(uint16 ano) view returns (bytes32[] areas, uint256[] caps, uint256[] mintedValues, uint256[] realizedValues)",
+    // Eventos (apenas para atualizações ao vivo, não para bootstrap)
     "event BudgetSet(uint16 indexed ano, bytes32 indexed area, uint256 cap)",
     "event MintToAgency(address indexed to, bytes32 indexed area, uint16 indexed ano, uint256 amount)",
   ];
@@ -80,7 +82,7 @@
       isTreasurySpan.textContent = isTreas ? "Sim" : "Não";
       btnAllocate.disabled = !isTreas;
 
-      // areas from events
+  // areas via getter (sem logs)
       const areas = await discoverAreas();
       await renderBudgets(areas);
       await populateAreas(areas);
@@ -94,25 +96,14 @@
     }
   }
 
+  // Usa view function getAreas() do contrato (evita varrer logs e limites de range)
   async function discoverAreas() {
-  const topicAdded = ethers.id("AreaAdded(bytes32)");
-  const topicRemoved = ethers.id("AreaRemoved(bytes32)");
-  const filter = { address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [[topicAdded, topicRemoved]] };
-    const logs = await provider.getLogs(filter);
-    const areas = new Map();
-    for (const log of logs) {
-      try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args) {
-          const area = parsed.args.area;
-          if (parsed.name === "AreaAdded") areas.set(area, true);
-          else if (parsed.name === "AreaRemoved") areas.set(area, false);
-        }
-      } catch (e) {
-        console.warn('Failed to parse area log:', e);
-      }
+    try {
+      return await contract.getAreas();
+    } catch (e) {
+      console.warn('getAreas() falhou, retornando lista vazia:', e.message);
+      return [];
     }
-    return [...areas.entries()].filter(([, active]) => active).map(([area]) => area);
   }
 
   async function populateAreas(areas) {
@@ -126,78 +117,48 @@
   }
 
   async function populateAgencies() {
-    // Get agencies from RoleSet events
-    const topicRoleSet = ethers.id("RoleSet(string,address,bool)");
-    const logs = await provider.getLogs({ address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [topicRoleSet] });
-    const agencies = new Set();
-    for (const log of logs) {
-      try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args) {
-          if (parsed.args.role === "AGENCY" && parsed.args.enabled) {
-            agencies.add(parsed.args.who);
-          }
-          if (parsed.args.role === "AGENCY" && !parsed.args.enabled) {
-            agencies.delete(parsed.args.who);
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to parse role set log:', e);
-      }
-    }
-    const active = [...agencies];
     allocAgency.innerHTML = "";
-    if (!active.length) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "Nenhuma agência encontrada";
+    let list = [];
+    if (contract.getAgencies) {
+      try { list = await contract.getAgencies(); } catch (e) { console.warn('getAgencies() falhou:', e.message); }
+    }
+    if (!list.length) {
+      const opt = document.createElement('option');
+      opt.value = ''; opt.textContent = 'Nenhuma agência encontrada';
       allocAgency.appendChild(opt);
       return;
     }
-    
-    // Fetch names from contract and populate options
-    for (const address of active) {
-      const opt = document.createElement("option");
-      opt.value = address;
-      opt.title = address; // show address on hover
-      
+    for (const address of list) {
+      const opt = document.createElement('option');
+      opt.value = address; opt.title = address;
       try {
         const name = await contract.agencyNames(address);
         opt.textContent = name || shorten(address);
-      } catch {
-        opt.textContent = shorten(address);
-      }
-      
+      } catch { opt.textContent = shorten(address); }
       allocAgency.appendChild(opt);
     }
   }
 
   async function renderBudgets(areas) {
-  const topic = ethers.id("BudgetSet(uint16,bytes32,uint256)");
-    const logs = await provider.getLogs({ address: contract.target, fromBlock: 0n, toBlock: "latest", topics: [topic] });
-    const years = new Set();
-    for (const log of logs) {
+    budgetsTable.innerHTML = 'Carregando…';
+    let years = [];
+    if (contract.getBudgetYears) {
+      try { years = await contract.getBudgetYears(); } catch (e) { console.warn('getBudgetYears() falhou:', e.message); }
+    }
+    if (!years.length) { budgetsTable.textContent = 'Nenhum orçamento definido.'; return; }
+    let html = '<table><thead><tr><th>Ano</th><th>Área</th><th>Cap</th><th>Minted</th><th>Realizado</th></tr></thead><tbody>';
+    for (const ano of years) {
       try {
-        const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
-        if (parsed && parsed.args) {
-          years.add(Number(parsed.args.ano));
+        const res = await contract.getBudgetsForYear(ano);
+        const yrAreas = res.areas || res[0];
+        const caps = res.caps || res[1];
+        const mintedVals = res.mintedValues || res[2];
+        const realizedVals = res.realizedValues || res[3];
+        for (let i = 0; i < yrAreas.length; i++) {
+          html += `<tr><td>${ano}</td><td>${b32ToLabel(yrAreas[i])}</td><td>${caps[i]}</td><td>${mintedVals[i]}</td><td>${realizedVals[i]}</td></tr>`;
         }
       } catch (e) {
-        console.warn('Failed to parse budget log:', e);
-      }
-    }
-    const yearsArr = [...years].sort();
-
-    let html = '<table><thead><tr><th>Ano</th><th>Área</th><th>Total (cap)</th><th>Emitido</th></tr></thead><tbody>';
-    for (const ano of yearsArr) {
-      for (const area of areas) {
-        const { cap, minted } = await contract.budget(ano, area);
-        html += `<tr>
-          <td>${ano}</td>
-          <td>${b32ToLabel(area)}</td>
-          <td>${cap}</td>
-          <td>${minted}</td>
-        </tr>`;
+        console.warn('getBudgetsForYear falhou ano=' + ano + ':', e.message);
       }
     }
     html += '</tbody></table>';

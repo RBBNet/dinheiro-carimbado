@@ -184,8 +184,17 @@
       try {
         log(`Definindo orçamento: ${b2s(area)} = ${amount} para ${year}`);
         
-        // Chamada SIMPLES - igual no console
-        const tx = await contract.setBudget(year, area, amount);
+        // Estimativa de gas
+        const ov0 = { type: 0, gasPrice: 0n };
+        const est = await contract.setBudget.estimateGas(year, area, amount, ov0);
+        console.log(`Estimativa e gas: ${est}`);
+
+        const tx = await contract.setBudget(year, area, amount, 
+          {
+            ...ov0,
+            gasLimit: (est * 12n)/10n
+          });
+
         log(`Transação enviada: ${tx.hash}`);
         
         await tx.wait();

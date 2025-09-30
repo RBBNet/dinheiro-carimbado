@@ -36,6 +36,9 @@
   const contractAddress = $("#contractAddress");
   const lastBlock = $("#lastBlock");
   const eventsLog = $("#eventsLog");
+  const addrInput = $("#addrInput");
+  const saveAddrBtn = $("#saveAddr");
+  const clearAddrBtn = $("#clearAddr");
 
   // Filter checkboxes
   const filterCheckboxes = {
@@ -297,13 +300,14 @@
       const network = await provider.getNetwork();
       networkName.textContent = network.name || `Chain ${network.chainId}`;
 
-      // Get contract address from localStorage or prompt user
-      let addr = localStorage.getItem('dinheiroCarimbadoAddress');
+      // Get contract address from input or localStorage
+      let addr = (addrInput && addrInput.value.trim()) || localStorage.getItem('dinheiroCarimbadoAddress');
       if (!addr) {
-        addr = prompt('Digite o endereço do contrato DinheiroCarimbado:');
-        if (addr) {
-          localStorage.setItem('dinheiroCarimbadoAddress', addr);
-        }
+        addr = prompt('Digite o endereço do contrato DinheiroCarimbado:') || '';
+      }
+      if (addr && ethers.isAddress(addr)) {
+        localStorage.setItem('dinheiroCarimbadoAddress', addr);
+        if (addrInput) addrInput.value = addr;
       }
 
       if (!addr) {
@@ -355,6 +359,26 @@
   // Event listeners
   connectBtn.addEventListener('click', connect);
   clearBtn.addEventListener('click', clearLog);
+  saveAddrBtn?.addEventListener('click', () => {
+    const v = addrInput.value.trim();
+    if (!v) { alert('Informe um endereço'); return; }
+    if (!ethers.isAddress(v)) { alert('Endereço inválido'); return; }
+    localStorage.setItem('dinheiroCarimbadoAddress', v);
+    contractAddress.textContent = shorten(v);
+    if (isConnected) connect();
+  });
+  clearAddrBtn?.addEventListener('click', () => {
+    localStorage.removeItem('dinheiroCarimbadoAddress');
+    if (addrInput) addrInput.value = '';
+    contractAddress.textContent = '-';
+    alert('Endereço removido. Informe outro e reconecte.');
+  });
+
+  // Preload stored address into input
+  (function preloadAddress(){
+    const stored = localStorage.getItem('dinheiroCarimbadoAddress');
+    if (stored && addrInput) addrInput.value = stored;
+  })();
 
   // Filter change handlers
   Object.values(filterCheckboxes).forEach(checkbox => {

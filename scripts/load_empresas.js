@@ -10,6 +10,12 @@ async function main() {
   const header = lines[0].split(',');
 
   // Instancia contrato
+  if (process.env.DC_CONTRACT === undefined) {
+    console.log("Usando o default para endereço do contrato");
+  }
+  else
+    console.log("Usando DC_CONTRACT do .env:", process.env.DC_CONTRACT);
+  
   const contractAddress = process.env.DC_CONTRACT || '0x5FbDB2315678afecb367f032d93F642f64180aa3';
   const [deployer] = await ethers.getSigners();
   const DC = await ethers.getContractFactory('DinheiroCarimbado');
