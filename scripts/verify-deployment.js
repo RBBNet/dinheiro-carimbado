@@ -437,15 +437,22 @@ async function verifyContractDeployment(contractAddress = null) {
 // Se executado diretamente via Hardhat
 async function main() {
   // Para usar com hardhat run, passe o endereço como variável de ambiente:
-  // CONTRACT_ADDRESS=0x1234... npx hardhat run scripts/verify-deployment.js --network rbb_lab
-  const contractAddress = process.env.CONTRACT_ADDRESS;
+  // CONTRACT_ADDRESS=0x1234... npx hardhat run scripts/verify-deployment.js --network rbblab
+  // OU deixe usar DC_CONTRACT do .env automaticamente
+  const contractAddress = process.env.CONTRACT_ADDRESS || process.env.DC_CONTRACT;
   
   if (contractAddress) {
-    console.log(`Verificando contrato existente: ${contractAddress}\n`);
+    console.log(`Verificando contrato existente: ${contractAddress}`);
+    if (process.env.DC_CONTRACT && !process.env.CONTRACT_ADDRESS) {
+      console.log(`(usando DC_CONTRACT do .env)\n`);
+    } else {
+      console.log(`(usando CONTRACT_ADDRESS)\n`);
+    }
   } else {
     console.log("Fazendo deploy e verificando novo contrato\n");
     console.log("💡 Para verificar um contrato específico, use:");
-    console.log("   CONTRACT_ADDRESS=0x1234... npx hardhat run scripts/verify-deployment.js --network rbb_lab\n");
+    console.log("   CONTRACT_ADDRESS=0x1234... npx hardhat run scripts/verify-deployment.js --network rbblab");
+    console.log("   ou defina DC_CONTRACT no arquivo .env\n");
   }
   
   const result = await verifyContractDeployment(contractAddress);

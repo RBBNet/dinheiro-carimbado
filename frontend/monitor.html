@@ -1,76 +1,42 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistema de Monitoramento - Dinheiro Carimbado</title>
-  <link rel="stylesheet" href="monitor.css">
+  <meta charset="UTF-8" />
+  <title>Monitor de Pagamentos - Dinheiro Carimbado</title>
+  <link rel="stylesheet" href="monitor.css" />
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
 </head>
 <body>
-  <header class="monitor-header">
-    <div class="header-content">
-      <h1><span class="icon">📡</span> Sistema de Monitoramento Blockchain</h1>
-      <div class="status-indicator">
-        <div id="connectionStatus" class="status-dot offline"></div>
-        <span id="statusText">Desconectado</span>
+  <header class="app-bar">
+    <div class="left">
+      <h1>📡 Pagamentos</h1>
+      <div class="meta">
+        <span class="chip" id="networkName">—</span>
+        <span class="chip" id="contractAddress">—</span>
+        <span class="chip">Bloco <span id="lastBlock">—</span></span>
       </div>
     </div>
-    <div class="network-info">
-      <span>Rede: <span id="networkName">—</span></span>
-      <span>Contrato: <span id="contractAddress">—</span></span>
-      <span>Último Bloco: <span id="lastBlock">—</span></span>
+    <div class="right">
+      <input id="addrInput" placeholder="0x contrato" />
+      <button id="saveAddr" title="Salvar endereço">💾</button>
+      <button id="clearAddr" title="Limpar endereço">♻️</button>
+      <button id="connectBtn" class="primary" title="Conectar">🔌 Conectar</button>
+      <button id="backfillBtn" title="Carregar últimos">📥</button>
+      <button id="clearBtn" title="Limpar log">🗑️</button>
+      <div id="connectionStatus" class="status-dot offline"></div>
+      <span id="statusText" class="status-text">Off</span>
     </div>
   </header>
-
-  <main class="monitor-main">
-    <section class="controls">
-      <button id="connectBtn" class="btn-primary">🔌 Conectar ao Blockchain</button>
-      <button id="clearBtn" class="btn-secondary">🗑️ Limpar Log</button>
-  <button id="backfillBtn" class="btn-secondary">📥 Carregar Eventos Recentes</button>
-      <div class="filters">
-        <label>
-          <input type="checkbox" id="filterCompanyUpsert" checked> CompanyUpsert
-        </label>
-        <label>
-          <input type="checkbox" id="filterCompanyAreaSet" checked> CompanyAreaSet
-        </label>
-        <label>
-          <input type="checkbox" id="filterBudgetSet" checked> BudgetSet
-        </label>
-        <label>
-          <input type="checkbox" id="filterMintToAgency" checked> MintToAgency
-        </label>
-        <label>
-          <input type="checkbox" id="filterTransferAreaYear" checked> TransferAreaYear
-        </label>
-        <label>
-          <input type="checkbox" id="filterPaidCompany" checked> PaidCompany
-        </label>
-      <div class="address-box" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-        <input id="addrInput" placeholder="0x endereço do contrato" style="flex:1;min-width:260px;padding:6px 8px;font-family:monospace;" />
-        <button id="saveAddr" class="btn-secondary" type="button">💾 Salvar</button>
-        <button id="clearAddr" class="btn-tertiary" type="button">♻️ Limpar</button>
+  <main>
+    <div id="eventsLog" class="events">
+      <div class="placeholder">
+        <div>📡</div>
+        <p>Aguardando conexão...</p>
+        <small>Informe e salve o endereço do contrato e clique Conectar</small>
       </div>
-      </div>
-    </section>
-
-    <section class="events-container">
-      <h2>📊 Log de Eventos em Tempo Real</h2>
-      <div id="eventsLog" class="events-log">
-        <div class="welcome-message">
-          <div class="pulse-icon">📡</div>
-          <p>Sistema de monitoramento iniciado</p>
-          <p class="subtitle">Conecte-se ao blockchain para começar a monitorar eventos</p>
-        </div>
-      </div>
-    </section>
+    </div>
   </main>
-
-  <footer class="monitor-footer">
-    <p>🛡️ Sistema de Auditoria e Compliance | Dinheiro Carimbado Blockchain Monitor</p>
-  </footer>
-
+  <footer class="footer">Dinheiro Carimbado • Monitor de Pagamentos (PaidCompany)</footer>
   <script src="monitor.js"></script>
 </body>
 </html>
