@@ -21,7 +21,10 @@
     "verify:local": "hardhat run scripts/verify-deployment.js --network localhost",
     "verify:rbblab": "hardhat run scripts/verify-deployment.js --network rbblab",
     "web": "http-server frontend -p 8080 -c-1",
-    "load:empresas": "hardhat run scripts/load_empresas.js --network localhost"
+    "load-empresas:local": "hardhat run scripts/load_empresas.js --network localhost",
+    "load-empresas:rbblab": "hardhat run scripts/load_empresas.js --network rbblab",
+    "paga-empresas:local": "hardhat run scripts/paga_empresas.js --network localhost",
+    "paga-empresas:rbblab": "hardhat run scripts/paga_empresas.js --network rbblab"
   },
   "overrides": {
     "chalk": "^4.1.2"
