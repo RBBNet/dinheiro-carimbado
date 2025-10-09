@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RBB • Simulador didático de validação</title>
+<style>
+  :root{
+    --bg:#0f1320;--card:#141a2a;--ink:#e9f0ff;--muted:#9fb0d0;--accent:#5ac8fa;--block:#6ee7b7;--edge:#2a3350;--edge-lit:#6aa5ff;
+    --tx:#8af;
+  }
+  *{box-sizing:border-box;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  body{margin:0;background:linear-gradient(180deg,#0d111a,#0b0f1a 60%);color:var(--ink)}
+  header{padding:14px 18px;border-bottom:1px solid #1f263a;background:#0e1422;position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center}
+  header h1{margin:0;font-size:16px;letter-spacing:.4px;color:#dfe8ff;font-weight:600}
+  header small{color:var(--muted)}
+  .stage{position:relative;height:calc(100vh - 60px);overflow:hidden}
+
+  svg#links{position:absolute;inset:0;pointer-events:none}
+  line.edge{stroke:var(--edge);stroke-width:2;opacity:.75;transition:stroke .2s, opacity .2s}
+  line.edge.active{stroke:var(--edge-lit);opacity:1}
+
+  .node{position:absolute;width:220px;height:200px;background:var(--card);border:1px solid #26314c;border-radiu:14px;box-shadow:0 10px 24px rgba(0,0,0,.25);display:flex;flex-direction:column;cursor:pointer;transition:transform .08s ease, box-shadow .2s;padding:8px}
+  .node:hover{transform:translateY(-2px)}
+  .node h3{margin:4px 0 6px;font-size:12px;font-weight:600;color:#c8d6ff;display:flex;gap:8px;align-items:center}
+  .badge{font-size:10px;background:#1c2440;border:1px solid #2a355a;border-radius:999px;padding:2px 8px;color:#a9b8de}
+
+  .txslot{height:26px;border:1px dashed #2b3a63;border-radius:6px;margin:2px 0;padding:2px 6px;display:flex;align-items:center;color:#b5c6ff;font-size:11px;opacity:.75}
+  .txslot.filled{border-style:solid;background:rgba(90,200,250,.12);opacity:1}
+  .txslot .pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 8px;font-size:10px;background:var(--tx);color:#071023;border:1px solid #9dc7ff}
+
+  .contracts{display:flex;flex-direction:column;gap:8px;margin:8px 0;flex:1}
+  .c{border:1px solid #2b375a;border-radius:10px;background:#0f162b;padding:6px;position:relative;overflow:hidden}
+  .c code{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;font-size:10px;color:#b9c8ff;white-space:pre}
+  .c.run{outline:2px solid var(--accent);box-shadow:0 0 0 4px rgba(90,200,250,.15) inset}
+
+  .blocks{border-top:1px solid #223055;padding:6px;display:flex;gap:6px;align-items:center;min-height:30px}
+  .blk{width:18px;height:18px;border-radius:3px;background:linear-gradient(180deg,#37d3a0,#2fb38b);box-shadow:0 1px 0 rgba(0,0,0,.5) inset, 0 0 0 1px #1b312b}
+
+  .legend{position:absolute;left:12px;bottom:12px;color:#9fb0d0;font-size:12px;background:#0e1423;border:1px solid #243150;border-radius:10px;padding:6px 10px}
+  .legend b{color:#cfe3ff}
+
+  .toast{position:fixed;right:14px;bottom:14px;background:#0e1423;border:1px solid #273354;color:#cfe3ff;padding:8px 12px;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.25);opacity:0;transform:translateY(8px);transition:all .25s}
+  .toast.show{opacity:1;transform:translateY(0)}
+
+  #speedSelector{background:#1c2440;color:#cfe3ff;border:1px solid #2a355a;border-radius:6px;padding:4px 6px;font-size:12px}
+  .phase-btn{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);background:#1c2440;border:1px solid #2a355a;color:#cfe3ff;padding:10px 18px;font-size:13px;border-radius:8px;cursor:pointer;letter-spacing:.5px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+  .phase-btn.hidden{display:none}
+  .phase-btn:hover{background:#253055}
+</style>
+</head>
+<body>
+<header>
+  <h1>RBB • Simulador didático de propagação, validação e blocagem <small>QBFT, público-permissionada, Besu</small></h1>
+  <div>
+    <label for="speedSelector">Velocidade:</label>
+    <select id="speedSelector">
+      <option value="1">Rápido</option>
+      <option value="2">Médio</option>
+      <option value="4">Lento</option>
+    </select>
+  </div>
+</header>
+<div class="stage" id="stage">
+  <svg id="links"></svg>
+  <div class="legend">Clique em <b>um nó Writer</b>. A transação se espalha → escolhe aleatoriamente 1 contrato (superior ou inferior) → todos os nós executam o mesmo contrato → ao atingir os 4 Validators, forma bloco → bloco retorna a todos.</div>
+</div>
+<div class="toast" id="toast">Transação validada pelos 4 Validators • novo bloco criado</div>
+<button id="phaseBtn" class="phase-btn hidden"></button>
+<script>
+(function(){
+  const stage=document.getElementById('stage');
+  const linkSvg=document.getElementById('links');
+  const speedSelector=document.getElementById('speedSelector');
+  const phaseBtn=document.getElementById('phaseBtn');
+  let speedFactor=1;
+  speedSelector.addEventListener('change',()=>{speedFactor=parseInt(speedSelector.value,10);});
+
+  const NODES=[]; const EDGES=[];
+  const W=stage.clientWidth; const H=Math.max(stage.clientHeight,680);
+
+  const row1Y = 0; // colado no topo do stage
+  const row2Y = H - 420; // deixa espaço para os nós + legend
+  const centerX1 = W*0.4;
+  const centerX2 = W*0.6;
+
+  const satellites=[
+    {id:4,x:0,y:row1Y,label:'Writer 1',connect:[0,2]},
+    {id:5,x:W-220,y:row1Y,label:'Observer 1',connect:[1,3]},
+    {id:6,x:0,y:row2Y,label:'Writer 2',connect:[0,2]},
+    {id:7,x:W-220,y:row2Y,label:'Observer 2',connect:[1,3]},
+  ];
+
+  const center=[
+    {id:0,x:centerX1-110,y:row1Y,label:'Validator A'},
+    {id:1,x:centerX2-110,y:row1Y,label:'Validator B'},
+    {id:2,x:centerX1-110,y:row2Y,label:'Validator C'},
+    {id:3,x:centerX2-110,y:row2Y,label:'Validator D'},
+  ];
+
+  for(let i=0;i<center.length;i++)for(let j=i+1;j<center.length;j++)EDGES.push([center[i].id,center[j].id]);
+  satellites.forEach(s=>{s.connect.forEach(c=>EDGES.push([s.id,c]));});
+
+  function mkNode(n){
+    const el=document.createElement('div');
+    el.className='node';
+    el.style.left=(n.x)+'px'; el.style.top=(n.y+8)+'px';
+    el.dataset.id=n.id;
+    el.innerHTML=`
+      <h3>${n.label} <span class="badge">nó</span></h3>
+      <div class="txslot"></div>
+      <div class="contracts">
+        ${[1,2].map(i=>`<div class=\"c\"><code>// 0x${(123456+i).toString(16)}\nfunction x${i}() {}</code></div>`).join('')}
+      </div>
+      <div class="blocks"></div>`;
+    el.addEventListener('click',()=>{
+      if(n.id>=4) startFlow(n.id); // só Sat inicia
+    });
+    stage.appendChild(el); n.el=el;
+  }
+
+  function drawEdges(){
+    const bb=stage.getBoundingClientRect();
+    linkSvg.setAttribute('viewBox',`0 0 ${bb.width} ${H}`);
+    linkSvg.innerHTML=EDGES.map(([a,b])=>{const A=getById(a),B=getById(b);return `<line class='edge' data-a='${a}' data-b='${b}' x1='${A.x+110}' y1='${A.y+108}' x2='${B.x+110}' y2='${B.y+108}'/>`;}).join('');
+  }
+  function getById(id){return NODES.find(n=>n.id===id);}
+
+  [...center,...satellites].forEach(n=>{NODES.push(n);mkNode(n);});
+  drawEdges();
+
+  let txCounter=0; let globalContractChoice=null;
+  function firstEmptySlot(node){const slot=node.el.querySelector('.txslot');return slot.classList.contains('filled')?null:slot;}
+  function flashContract(node){if(globalContractChoice===null)return;const cs=node.el.querySelectorAll('.c');const pick=cs[globalContractChoice];pick.classList.add('run');setTimeout(()=>pick.classList.remove('run'),600*speedFactor);}
+  function addBlock(node){const bar=node.el.querySelector('.blocks');const b=document.createElement('div');b.className='blk';bar.appendChild(b);}
+  function clearTransaction(node){const slot=node.el.querySelector('.txslot');if(slot.classList.contains('filled')){slot.classList.remove('filled');slot.innerHTML='';}}
+  function markEdge(a,b,active){const q=`line.edge[data-a='${a}'][data-b='${b}'], line.edge[data-a='${b}'][data-b='${a}']`;document.querySelectorAll(q).forEach(l=>l.classList.toggle('active',!!active));}
+  function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200*speedFactor);}
+
+  function replicateTransaction(node, txId){
+    const slot=firstEmptySlot(node);
+    if(slot){
+      const pill=document.createElement('span');
+      pill.className='pill';
+      pill.textContent=`TX #${txId}`;
+      slot.classList.add('filled');
+      slot.appendChild(pill);
+    }
+  }
+
+  function showPhaseButton(label,action){phaseBtn.textContent=label;phaseBtn.classList.remove('hidden');phaseBtn.onclick=()=>{phaseBtn.classList.add('hidden');action();};}
+
+  function startFlow(originId){
+    const origin=getById(originId);const slot=firstEmptySlot(origin);if(!slot)return;
+    const txId=++txCounter;const pill=document.createElement('span');pill.className='pill';pill.textContent=`TX #${txId}`;slot.classList.add('filled');slot.appendChild(pill);globalContractChoice=Math.floor(Math.random()*2);
+    const visited=new Set([originId]);const q=[originId];
+    function step(){if(q.length===0){document.querySelectorAll('line.edge').forEach(l=>l.classList.remove('active'));showPhaseButton('Executar contratos (Validators)',runValidatorContracts);return;}
+      const u=q.shift();const neigh=EDGES.filter(e=>e[0]===u||e[1]===u).map(e=>e[0]===u?e[1]:e[0]);let delay=0;neigh.forEach(v=>{if(!visited.has(v)){visited.add(v);q.push(v);setTimeout(()=>{markEdge(u,v,true);replicateTransaction(getById(v),txId);},(delay+=140)*speedFactor);setTimeout(()=>markEdge(u,v,false),(delay+420)*speedFactor);}});setTimeout(step,Math.max(220,delay)*speedFactor);}step();}
+  function runValidatorContracts(){[0,1,2,3].forEach(id=>flashContract(getById(id)));setTimeout(()=>showPhaseButton('Criar blocos (Validators)',createValidatorBlocks),600*speedFactor);}  
+  function createValidatorBlocks(){[0,1,2,3].forEach(id=>{addBlock(getById(id));clearTransaction(getById(id));});propagateBlocksToWriters();}
+  function propagateBlocksToWriters(){
+    const centerNodes=[0,1,2,3];const writerNodes=[4,5,6,7];let pending=0;
+    centerNodes.forEach(c=>{
+      EDGES.filter(e=> (e[0]===c && writerNodes.includes(e[1])) || (e[1]===c && writerNodes.includes(e[0]))).forEach(e=>{
+        const w=e[0]===c?e[1]:e[0];pending++;markEdge(c,w,true);setTimeout(()=>{markEdge(c,w,false);if(--pending===0)showPhaseButton('Executar contratos (Writers)',runWriterContracts);},420*speedFactor);
+      });
+    });
+  }
+  function runWriterContracts(){[4,5,6,7].forEach(id=>flashContract(getById(id)));setTimeout(()=>showPhaseButton('Criar blocos (Writers)',createWriterBlocks),600*speedFactor);}  
+  function createWriterBlocks(){[4,5,6,7].forEach(id=>{addBlock(getById(id));clearTransaction(getById(id));});toast('Fluxo concluído');}
+})();
+</script>
+</body>
+</html>
